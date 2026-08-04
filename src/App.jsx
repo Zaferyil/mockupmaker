@@ -475,38 +475,6 @@ export default function MockupSelectionScreen() {
 
       {/* İçerik */}
       <div className="relative z-10 max-w-3xl mx-auto px-3 sm:px-10 -mt-5">
-        {r2Status !== "unconfigured" && (
-          <div className="mb-4">
-            <SectionCard accent={ACCENT.yellow} label={t.chooseTemplate}>
-              <p className="text-xs font-body text-gray-400 mb-3">{t.chooseTemplateHint}</p>
-              {r2Status === "loading" ? (
-                <p className="text-sm font-body text-gray-400 italic">{t.r2Loading}</p>
-              ) : r2Status === "error" ? (
-                <p className="text-xs font-body rounded-lg px-2.5 py-1.5 inline-block" style={{ backgroundColor: "#FFF4EE", color: ACCENT.coral }}>
-                  {t.r2ListError}
-                </p>
-              ) : templates.length === 0 ? (
-                <p className="text-sm font-body text-gray-400 italic">{t.templatesEmpty}</p>
-              ) : (
-                <div className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1">
-                  {templates.map((tpl) => {
-                    const active = brand === tpl.brandId && product === tpl.productId && marketplace === tpl.marketplace;
-                    return (
-                      <TemplateCard
-                        key={tpl.id}
-                        tpl={tpl}
-                        active={active}
-                        onClick={() => handleSelectTemplate(tpl)}
-                        t={t}
-                      />
-                    );
-                  })}
-                </div>
-              )}
-            </SectionCard>
-          </div>
-        )}
-
         <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-4">
           <SectionCard accent={ACCENT.coral} label={t.step1}>
             <div className="flex flex-wrap gap-2">
@@ -544,6 +512,38 @@ export default function MockupSelectionScreen() {
             )}
           </SectionCard>
         </div>
+
+        {r2Status !== "unconfigured" && (
+          <div className="mb-4">
+            <SectionCard accent={ACCENT.yellow} label={t.chooseTemplate}>
+              <p className="text-xs font-body text-gray-400 mb-3">{t.chooseTemplateHint}</p>
+              {r2Status === "loading" ? (
+                <p className="text-sm font-body text-gray-400 italic">{t.r2Loading}</p>
+              ) : r2Status === "error" ? (
+                <p className="text-xs font-body rounded-lg px-2.5 py-1.5 inline-block" style={{ backgroundColor: "#FFF4EE", color: ACCENT.coral }}>
+                  {t.r2ListError}
+                </p>
+              ) : templates.length === 0 ? (
+                <p className="text-sm font-body text-gray-400 italic">{t.templatesEmpty}</p>
+              ) : (
+                <div className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1">
+                  {templates.map((tpl) => {
+                    const active = brand === tpl.brandId && product === tpl.productId && marketplace === tpl.marketplace;
+                    return (
+                      <TemplateCard
+                        key={tpl.id}
+                        tpl={tpl}
+                        active={active}
+                        onClick={() => handleSelectTemplate(tpl)}
+                        t={t}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </SectionCard>
+          </div>
+        )}
 
         {/* Adım 5: Tasarım & Yerleşim */}
         <div className="mb-4">
