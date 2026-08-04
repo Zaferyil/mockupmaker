@@ -74,6 +74,10 @@ const T = {
     noColorsYet: "Bu kombinasyon için R2'de henüz mockup yok",
     r2Loading: "R2'deki mockuplar taranıyor…",
     r2ListError: "R2 mockup listesi alınamadı — tüm renkler gösteriliyor, bazıları mevcut olmayabilir.",
+    chooseTemplate: "Şablon Seç",
+    chooseTemplateHint: "R2'deki hazır mockuplardan göz atarak hızlıca başla (opsiyonel)",
+    colorsAvailable: "renk mevcut",
+    templatesEmpty: "R2'de henüz hiç mockup yok",
     dockLabel: "Aranacak Mockup",
     dockEmpty: "Tüm alanları doldurunca dosya adları burada oluşur",
     ready: "hazır",
@@ -109,6 +113,10 @@ const T = {
     noColorsYet: "Für diese Kombination gibt es noch keine Mockups in R2",
     r2Loading: "Mockups in R2 werden durchsucht…",
     r2ListError: "R2-Mockup-Liste konnte nicht geladen werden — alle Farben werden angezeigt, einige sind evtl. nicht verfügbar.",
+    chooseTemplate: "Vorlage wählen",
+    chooseTemplateHint: "Schnellstart durch Stöbern in vorhandenen R2-Mockups (optional)",
+    colorsAvailable: "Farben verfügbar",
+    templatesEmpty: "Noch keine Mockups in R2",
     dockLabel: "Gesuchtes Mockup",
     dockEmpty: "Sobald alle Felder ausgefüllt sind, erscheinen hier die Dateinamen",
     ready: "bereit",
@@ -144,6 +152,10 @@ const T = {
     noColorsYet: "No mockups in R2 yet for this combination",
     r2Loading: "Scanning R2 for mockups…",
     r2ListError: "Couldn't fetch the R2 mockup list — showing all colors, some may not be available.",
+    chooseTemplate: "Choose a Template",
+    chooseTemplateHint: "Jump-start by browsing what's already in R2 (optional)",
+    colorsAvailable: "colors available",
+    templatesEmpty: "No mockups in R2 yet",
     dockLabel: "Mockup to look up",
     dockEmpty: "Once every field is filled, filenames appear here",
     ready: "ready",
@@ -314,6 +326,33 @@ export default function MockupSelectionScreen() {
 
   const selectableColors = r2Status === "error" ? colors : colors.filter((c) => availableColorNames.has(c.name));
 
+  // R2'deki gerçek dosyaları marka+ürün+pazar yerine göre gruplayıp göz atılabilir şablonlara çevirir
+  const templates = useMemo(() => {
+    const map = new Map();
+    for (const e of r2Entries) {
+      const id = `${e.brandId}__${e.productId}__${e.marketplace}`;
+      if (!map.has(id)) {
+        map.set(id, { id, brandId: e.brandId, productId: e.productId, marketplace: e.marketplace, colorNames: [], thumbKey: e.key });
+      }
+      map.get(id).colorNames.push(e.color);
+    }
+    return Array.from(map.values()).map((tpl) => ({
+      ...tpl,
+      colorCount: tpl.colorNames.length,
+      thumbSrc: mockupSrcFor(tpl.thumbKey),
+      brandLabel: BRANDS.find((b) => b.id === tpl.brandId)?.label ?? tpl.brandId,
+      productLabel: t.products[tpl.productId] ?? tpl.productId,
+    }));
+  }, [r2Entries, t]);
+
+  function handleSelectTemplate(tpl) {
+    setBrand(tpl.brandId);
+    setProduct(tpl.productId);
+    setMarketplace(tpl.marketplace);
+    setSelectedColors([]);
+    setGenerated(false);
+  }
+
   function handleBrandChange(id) {
     setBrand(id);
     setSelectedColors([]);
@@ -432,6 +471,38 @@ export default function MockupSelectionScreen() {
 
       {/* İçerik */}
       <div className="relative z-10 max-w-3xl mx-auto px-3 sm:px-10 -mt-5">
+        {r2Status !== "unconfigured" && (
+          <div className="mb-4">
+            <SectionCard accent={ACCENT.yellow} label={t.chooseTemplate}>
+              <p className="text-xs font-body text-gray-400 mb-3">{t.chooseTemplateHint}</p>
+              {r2Status === "loading" ? (
+                <p className="text-sm font-body text-gray-400 italic">{t.r2Loading}</p>
+              ) : r2Status === "error" ? (
+                <p className="text-xs font-body rounded-lg px-2.5 py-1.5 inline-block" style={{ backgroundColor: "#FFF4EE", color: ACCENT.coral }}>
+                  {t.r2ListError}
+                </p>
+              ) : templates.length === 0 ? (
+                <p className="text-sm font-body text-gray-400 italic">{t.templatesEmpty}</p>
+              ) : (
+                <div className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1">
+                  {templates.map((tpl) => {
+                    const active = brand === tpl.brandId && product === tpl.productId && marketplace === tpl.marketplace;
+                    return (
+                      <TemplateCard
+                        key={tpl.id}
+                        tpl={tpl}
+                        active={active}
+                        onClick={() => handleSelectTemplate(tpl)}
+                        t={t}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </SectionCard>
+          </div>
+        )}
+
         <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-4">
           <SectionCard accent={ACCENT.coral} label={t.step1}>
             <div className="flex flex-wrap gap-2">
@@ -710,6 +781,45 @@ function Chip({ active, accent, onClick, children }) {
       }}
     >
       {children}
+    </button>
+  );
+}
+
+// R2'de gerçekten var olan bir marka+ürün+pazar yeri kombinasyonunu önizleyip tek tıkla seçtiren kart
+function TemplateCard({ tpl, active, onClick, t }) {
+  const [imgFailed, setImgFailed] = useState(false);
+
+  return (
+    <button
+      onClick={onClick}
+      className="shrink-0 w-32 text-left rounded-xl border overflow-hidden transition"
+      style={{ borderColor: active ? ACCENT.violet : "#e5e7eb", boxShadow: active ? `0 0 0 2px ${ACCENT.violet}` : "none" }}
+    >
+      <div className="w-32 h-32 bg-gray-100 flex items-center justify-center overflow-hidden">
+        {tpl.thumbSrc && !imgFailed ? (
+          <img
+            src={tpl.thumbSrc}
+            alt={tpl.brandLabel}
+            className="w-full h-full object-cover"
+            onError={() => setImgFailed(true)}
+          />
+        ) : (
+          <ImageOff className="w-5 h-5 text-gray-300" />
+        )}
+      </div>
+      <div className="p-2">
+        <p className="font-display font-semibold text-xs text-gray-900 truncate">{tpl.brandLabel}</p>
+        <p className="font-body text-[11px] text-gray-500 truncate">{tpl.productLabel}</p>
+        <div className="flex items-center justify-between mt-1">
+          <span className="font-mono2 text-[10px] text-gray-400">{tpl.colorCount} {t.colorsAvailable}</span>
+          <span
+            className="font-mono2 text-[9px] uppercase px-1.5 py-0.5 rounded-full"
+            style={{ backgroundColor: "#F3F0FF", color: ACCENT.violet }}
+          >
+            {t.marketplaces[tpl.marketplace]}
+          </span>
+        </div>
+      </div>
     </button>
   );
 }
