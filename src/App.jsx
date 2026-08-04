@@ -238,14 +238,21 @@ const COLOR_CATALOG = {
   ],
 };
 
-function fileEntriesFor({ brand, colors, product, marketplace }) {
-  if (!brand || !colors.length || !product) return [];
-  const brandLabel = BRANDS.find((b) => b.id === brand)?.label ?? brand;
-  const suffix = marketplace === "amazon" ? "_White-BG" : "";
-  return colors.map((color) => ({
-    color,
-    key: `${brandLabel.replace(/\s+/g, "-")}_${color}_${product}${suffix}.png`,
-  }));
+// Seçilen marka/ürün/pazar yeri/renklerle eşleşen GERÇEK R2 dosyalarını döndürür.
+// Dosya adı asla tahmin edilmez — sadece /list'in döndürdüğü gerçek anahtarlar kullanılır,
+// bu yüzden aynı renk için birden fazla mockup varsa hepsi üretilir.
+function entriesFromR2({ r2Entries, brand, product, marketplace, selectedColors }) {
+  if (!brand || !product || !marketplace || !selectedColors.length) return [];
+  const matches = r2Entries.filter(
+    (e) => e.brandId === brand && e.productId === product && e.marketplace === marketplace && selectedColors.includes(e.color)
+  );
+  const seen = new Map();
+  return matches.map((e) => {
+    const totalForColor = matches.filter((m) => m.color === e.color).length;
+    const n = (seen.get(e.color) || 0) + 1;
+    seen.set(e.color, n);
+    return { ...e, color: e.color, label: totalForColor > 1 ? `${e.color} #${n}` : e.color };
+  });
 }
 
 function isLight(hex) {
@@ -375,15 +382,12 @@ export default function MockupSelectionScreen() {
     setGenerated(false);
   }
 
-  const entries = fileEntriesFor({
-    brand,
-    colors: selectedColors,
-    product: product ? PRODUCT_FILE_LABELS[product] : null,
-    marketplace,
-  });
+  const entries = entriesFromR2({ r2Entries, brand, product, marketplace, selectedColors });
   const dockKeys = entries.map((e) => e.key);
   const isAmazon = marketplace === "amazon";
 
+  // entries zaten R2'de doğrulanmış gerçek dosyalar olduğundan src her zaman geçerlidir;
+  // filtre yalnızca güvenlik amaçlı (ör. üretim sırasında dosya R2'den silinmişse) tutulur.
   const entriesWithSrc = entries.map((e) => ({ ...e, src: mockupSrcFor(e.key) }));
   const matchedEntries = entriesWithSrc.filter((e) => e.src);
   const missingCount = entries.length - matchedEntries.length;
@@ -695,7 +699,7 @@ export default function MockupSelectionScreen() {
                       else previewRefs.current.delete(e.key);
                     }}
                     fileKey={e.key}
-                    label={e.color}
+                    label={e.label}
                     mockupSrc={e.src}
                     designSrc={designImg}
                     placement={placement}
@@ -1018,8 +1022,10 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
 const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockupSrc, designSrc, placement, t }, ref) {
   const canvasRef = useRef(null);
   const [hasImage, setHasImage] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
+    setLoadFailed(false);
     if (!mockupSrc) {
       setHasImage(false);
       return;
@@ -1069,7 +1075,10 @@ const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockup
         setHasImage(true);
       }
     };
-    mockupImg.onerror = () => setHasImage(false);
+    mockupImg.onerror = () => {
+      setHasImage(false);
+      setLoadFailed(true);
+    };
     mockupImg.src = mockupSrc;
   }, [mockupSrc, designSrc, placement]);
 
@@ -1085,7 +1094,7 @@ const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockup
 
   useImperativeHandle(ref, () => ({ download }));
 
-  if (!mockupSrc) {
+  if (!mockupSrc || loadFailed) {
     return (
       <div className="bg-gray-50 rounded-xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center p-4 aspect-square text-center">
         <ImageOff className="w-5 h-5 text-gray-300 mb-2" />
