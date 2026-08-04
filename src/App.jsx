@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect, forwardRef, useImperativeHandle } from "react";
+import JSZip from "jszip";
 import {
   Check,
   Shirt,
@@ -96,7 +97,9 @@ const T = {
     printArea: "Baskı Alanı",
     opacity: "Opaklık",
     download: "İndir",
-    downloadAll: "Tümünü İndir",
+    downloadAll: "Tümünü İndir (ZIP)",
+    zippingAll: "ZIP hazırlanıyor…",
+    zipError: "ZIP oluşturulamadı, tek tek indirmeyi dene",
     mockupMissing: "R2'de bulunamadı",
     r2NotConfigured: "R2 bağlantısı henüz kurulmadı — mockuplar depodan otomatik gelemiyor. Worker adresini R2_BASE_URL'e girince, seçtiğin her renk için mockup otomatik yüklenecek.",
     generateMockups: "Mockupları Oluştur",
@@ -138,7 +141,9 @@ const T = {
     printArea: "Druckbereich",
     opacity: "Deckkraft",
     download: "Herunterladen",
-    downloadAll: "Alle herunterladen",
+    downloadAll: "Alle herunterladen (ZIP)",
+    zippingAll: "ZIP wird erstellt…",
+    zipError: "ZIP konnte nicht erstellt werden, versuche es einzeln herunterzuladen",
     mockupMissing: "In R2 nicht gefunden",
     r2NotConfigured: "R2-Verbindung ist noch nicht eingerichtet — Mockups können nicht automatisch geladen werden. Sobald die Worker-Adresse in R2_BASE_URL eingetragen ist, lädt jede gewählte Farbe automatisch ihr Mockup.",
     generateMockups: "Mockups erstellen",
@@ -180,7 +185,9 @@ const T = {
     printArea: "Print Area",
     opacity: "Opacity",
     download: "Download",
-    downloadAll: "Download All",
+    downloadAll: "Download All (ZIP)",
+    zippingAll: "Zipping…",
+    zipError: "Couldn't build the ZIP, try downloading individually",
     mockupMissing: "Not found in R2",
     r2NotConfigured: "R2 isn't connected yet — mockups can't load automatically. Once the Worker address is set in R2_BASE_URL, every color you pick will fetch its mockup on its own.",
     generateMockups: "Generate Mockups",
@@ -306,6 +313,7 @@ export default function MockupSelectionScreen() {
   const placementsLoadedRef = useRef(false);
   const [hoveredColor, setHoveredColor] = useState(null);
   const [generated, setGenerated] = useState(false);
+  const [zipStatus, setZipStatus] = useState("idle"); // idle | zipping | error
 
   // R2 bucket'ındaki gerçek mockup dosyalarının canlı listesi
   const [r2Status, setR2Status] = useState(R2_LIST_URL ? "loading" : "unconfigured");
@@ -491,12 +499,37 @@ export default function MockupSelectionScreen() {
     setGenerated(false);
   }
 
-  function handleDownloadAll() {
-    matchedEntries.forEach((e, i) => {
-      setTimeout(() => {
-        previewRefs.current.get(e.key)?.download();
-      }, i * 250);
-    });
+  async function handleDownloadAll() {
+    if (zipStatus === "zipping") return;
+    setZipStatus("zipping");
+    try {
+      const zip = new JSZip();
+      const usedNames = new Set();
+      for (const e of matchedEntries) {
+        const blob = await previewRefs.current.get(e.key)?.getBlob();
+        if (!blob) continue;
+        // Aynı dosya adı iki kere eklenmesin (teorik olarak olmamalı ama güvenlik için)
+        let name = e.key;
+        let n = 2;
+        while (usedNames.has(name)) {
+          name = e.key.replace(/\.png$/i, `_${n}.png`);
+          n++;
+        }
+        usedNames.add(name);
+        zip.file(name, blob);
+      }
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.download = `mockups_${stamp}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setZipStatus("idle");
+    } catch {
+      setZipStatus("error");
+    }
   }
 
   return (
@@ -802,14 +835,19 @@ export default function MockupSelectionScreen() {
                 </div>
                 <button
                   onClick={handleDownloadAll}
-                  disabled={matchedEntries.length === 0}
+                  disabled={matchedEntries.length === 0 || zipStatus === "zipping"}
                   className="flex items-center gap-1.5 text-xs font-body font-semibold rounded-full px-3 py-1.5 text-white disabled:opacity-40"
                   style={{ backgroundColor: "#1a1a1a" }}
                 >
                   <Download className="w-3 h-3" />
-                  {t.downloadAll}
+                  {zipStatus === "zipping" ? t.zippingAll : t.downloadAll}
                 </button>
               </div>
+              {zipStatus === "error" && (
+                <p className="text-xs font-body rounded-lg px-2.5 py-1.5 mb-2 inline-block" style={{ backgroundColor: "#FFF4EE", color: ACCENT.coral }}>
+                  {t.zipError}
+                </p>
+              )}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {entriesWithSrc.map((e) => (
                   <MockupPreview
@@ -1151,10 +1189,10 @@ const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockup
     const mockupImg = new Image();
     mockupImg.crossOrigin = "anonymous";
     mockupImg.onload = () => {
-      const maxW = 480;
-      const ratio = Math.min(1, maxW / mockupImg.width);
-      canvas.width = mockupImg.width * ratio;
-      canvas.height = mockupImg.height * ratio;
+      // Canvas her zaman orijinal mockup çözünürlüğünde oluşturulur — küçük gösterim
+      // sadece CSS ile yapılır (w-full h-auto), böylece indirilen dosya kalite kaybetmez.
+      canvas.width = mockupImg.width;
+      canvas.height = mockupImg.height;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(mockupImg, 0, 0, canvas.width, canvas.height);
 
@@ -1200,14 +1238,25 @@ const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockup
   function download() {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const url = canvas.toDataURL("image/png");
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileKey;
-    a.click();
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileKey;
+      a.click();
+      URL.revokeObjectURL(url);
+    }, "image/png");
   }
 
-  useImperativeHandle(ref, () => ({ download }));
+  // "Tümünü İndir" (zip) için — canvas'ı olduğu tam çözünürlükte bir Blob olarak döner
+  function getBlob() {
+    const canvas = canvasRef.current;
+    if (!canvas || !hasImage) return Promise.resolve(null);
+    return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), "image/png"));
+  }
+
+  useImperativeHandle(ref, () => ({ download, getBlob }));
 
   if (!mockupSrc || loadFailed) {
     return (
