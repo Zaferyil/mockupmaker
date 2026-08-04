@@ -704,6 +704,11 @@ const HANDLE_POS = {
 function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChange, t }) {
   const containerRef = useRef(null);
   const dragRef = useRef(null);
+  const [refFailed, setRefFailed] = useState(false);
+
+  useEffect(() => {
+    setRefFailed(false);
+  }, [referenceSrc]);
 
   useEffect(() => {
     function onMove(e) {
@@ -755,8 +760,13 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
       className="relative w-full aspect-square rounded-xl overflow-hidden bg-gray-100 select-none"
       style={{ touchAction: "none" }}
     >
-      {referenceSrc ? (
-        <img src={referenceSrc} alt="mockup" className="absolute inset-0 w-full h-full object-contain pointer-events-none" />
+      {referenceSrc && !refFailed ? (
+        <img
+          src={referenceSrc}
+          alt="mockup"
+          className="absolute inset-0 w-full h-full object-contain pointer-events-none"
+          onError={() => setRefFailed(true)}
+        />
       ) : (
         <TShirtSilhouette color={tshirtColor} />
       )}
