@@ -26,10 +26,28 @@ const ACCENT = {
 // "https://sezalab-mockup-upload.<hesap>.workers.dev/mockup"
 // Mockuplar bu adresten anahtar (dosya adı) ile otomatik çekilir.
 const R2_BASE_URL = "https://wispy-mountain-cee5.zafer-yildiz4101.workers.dev/mockup";
+// Worker'ın bucket'taki tüm dosya adlarını JSON dizi olarak döndüren endpoint'i.
+const R2_LIST_URL = R2_BASE_URL ? `${new URL(R2_BASE_URL).origin}/list` : null;
 
 function mockupSrcFor(key) {
   if (!R2_BASE_URL) return null;
   return `${R2_BASE_URL}/${encodeURIComponent(key)}`;
+}
+
+// Dosya adını "{Brand-Slug}_{Renk}_{Ürün}[_White-BG].png" kalıbından geri çözer.
+function parseMockupKey(key) {
+  const parts = key.replace(/\.png$/i, "").split("_");
+  let isAmazon = false;
+  if (parts[parts.length - 1] === "White-BG") {
+    isAmazon = true;
+    parts.pop();
+  }
+  if (parts.length !== 3) return null;
+  const [brandSlug, color, productLabel] = parts;
+  const brand = BRANDS.find((b) => b.label.replace(/\s+/g, "-") === brandSlug);
+  const productId = Object.keys(PRODUCT_FILE_LABELS).find((id) => PRODUCT_FILE_LABELS[id] === productLabel);
+  if (!brand || !productId) return null;
+  return { key, brandId: brand.id, color, productId, marketplace: isAmazon ? "amazon" : "etsy" };
 }
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -53,7 +71,9 @@ const T = {
     step5: "Tasarım & Yerleşim",
     amazonWarning: "Amazon seçildi → sadece beyaz arka planlı mockuplar kullanılır",
     chooseBrandFirst: "Önce blank marka ve ürün tipi seç",
-    noColorsYet: "Bu kombinasyon için renk verisi henüz eklenmedi",
+    noColorsYet: "Bu kombinasyon için R2'de henüz mockup yok",
+    r2Loading: "R2'deki mockuplar taranıyor…",
+    r2ListError: "R2 mockup listesi alınamadı — tüm renkler gösteriliyor, bazıları mevcut olmayabilir.",
     dockLabel: "Aranacak Mockup",
     dockEmpty: "Tüm alanları doldurunca dosya adları burada oluşur",
     ready: "hazır",
@@ -86,7 +106,9 @@ const T = {
     step5: "Design & Platzierung",
     amazonWarning: "Amazon gewählt → es werden nur Mockups mit weißem Hintergrund verwendet",
     chooseBrandFirst: "Zuerst Blank-Marke und Produkttyp wählen",
-    noColorsYet: "Für diese Kombination sind noch keine Farben hinterlegt",
+    noColorsYet: "Für diese Kombination gibt es noch keine Mockups in R2",
+    r2Loading: "Mockups in R2 werden durchsucht…",
+    r2ListError: "R2-Mockup-Liste konnte nicht geladen werden — alle Farben werden angezeigt, einige sind evtl. nicht verfügbar.",
     dockLabel: "Gesuchtes Mockup",
     dockEmpty: "Sobald alle Felder ausgefüllt sind, erscheinen hier die Dateinamen",
     ready: "bereit",
@@ -119,7 +141,9 @@ const T = {
     step5: "Design & Placement",
     amazonWarning: "Amazon selected → only white-background mockups will be used",
     chooseBrandFirst: "Select blank brand and product type first",
-    noColorsYet: "No colors added yet for this combination",
+    noColorsYet: "No mockups in R2 yet for this combination",
+    r2Loading: "Scanning R2 for mockups…",
+    r2ListError: "Couldn't fetch the R2 mockup list — showing all colors, some may not be available.",
     dockLabel: "Mockup to look up",
     dockEmpty: "Once every field is filled, filenames appear here",
     ready: "ready",
@@ -243,12 +267,52 @@ export default function MockupSelectionScreen() {
   const [hoveredColor, setHoveredColor] = useState(null);
   const [generated, setGenerated] = useState(false);
 
+  // R2 bucket'ındaki gerçek mockup dosyalarının canlı listesi
+  const [r2Status, setR2Status] = useState(R2_LIST_URL ? "loading" : "unconfigured");
+  const [r2Keys, setR2Keys] = useState([]);
+
   const previewRefs = useRef(new Map());
 
   const t = T[lang];
 
+  useEffect(() => {
+    if (!R2_LIST_URL) return;
+    let cancelled = false;
+    fetch(R2_LIST_URL)
+      .then((res) => {
+        if (!res.ok) throw new Error(`list failed: ${res.status}`);
+        return res.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setR2Keys(Array.isArray(data) ? data : []);
+        setR2Status("ready");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setR2Status("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const r2Entries = useMemo(() => r2Keys.map(parseMockupKey).filter(Boolean), [r2Keys]);
+
   const colorKey = brand && product ? `${brand}__${product}` : null;
   const colors = useMemo(() => (colorKey ? COLOR_CATALOG[colorKey] ?? [] : []), [colorKey]);
+
+  // R2'de gerçekten karşılığı olan renkler — statik katalog yerine bunlar seçilebilir
+  const availableColorNames = useMemo(() => {
+    if (!brand || !product || !marketplace) return new Set();
+    return new Set(
+      r2Entries
+        .filter((e) => e.brandId === brand && e.productId === product && e.marketplace === marketplace)
+        .map((e) => e.color)
+    );
+  }, [r2Entries, brand, product, marketplace]);
+
+  const selectableColors = r2Status === "error" ? colors : colors.filter((c) => availableColorNames.has(c.name));
 
   function handleBrandChange(id) {
     setBrand(id);
@@ -257,6 +321,11 @@ export default function MockupSelectionScreen() {
   }
   function handleProductChange(id) {
     setProduct(id);
+    setSelectedColors([]);
+    setGenerated(false);
+  }
+  function handleMarketplaceChange(id) {
+    setMarketplace(id);
     setSelectedColors([]);
     setGenerated(false);
   }
@@ -388,7 +457,7 @@ export default function MockupSelectionScreen() {
           <SectionCard accent={ACCENT.violet} label={t.step3}>
             <div className="flex flex-wrap gap-2">
               {MARKETPLACE_IDS.map((id) => (
-                <Chip key={id} active={marketplace === id} accent={ACCENT.violet} onClick={() => setMarketplace(id)}>
+                <Chip key={id} active={marketplace === id} accent={ACCENT.violet} onClick={() => handleMarketplaceChange(id)}>
                   {t.marketplaces[id]}
                 </Chip>
               ))}
@@ -460,38 +529,47 @@ export default function MockupSelectionScreen() {
                   </div>
                 )}
 
-                {/* Renk seçimi — önizlemenin hemen altında */}
+                {/* Renk seçimi — önizlemenin hemen altında. Sadece R2'de gerçekten mockup'ı olan renkler seçilebilir. */}
                 <div className="pt-2 border-t border-gray-100">
                   <p className="text-[11px] tracking-[0.15em] uppercase text-gray-400 font-mono2 mb-2.5">{t.step4}</p>
                   {!brand || !product ? (
                     <p className="text-sm font-body text-gray-400 italic">{t.chooseBrandFirst}</p>
-                  ) : colors.length === 0 ? (
+                  ) : r2Status === "loading" ? (
+                    <p className="text-sm font-body text-gray-400 italic">{t.r2Loading}</p>
+                  ) : selectableColors.length === 0 ? (
                     <p className="text-sm font-body text-gray-400 italic">{t.noColorsYet}</p>
                   ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {colors.map((c) => {
-                        const active = selectedColors.includes(c.name);
-                        return (
-                          <button
-                            key={c.name}
-                            onClick={() => toggleColor(c.name)}
-                            onMouseEnter={() => setHoveredColor(c.hex)}
-                            onMouseLeave={() => setHoveredColor(null)}
-                            className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1.5 rounded-full border text-xs font-body font-medium transition text-left"
-                            style={{
-                              borderColor: active ? "#1a1a1a" : "#e5e7eb",
-                              backgroundColor: active ? "#1a1a1a" : "white",
-                              color: active ? "white" : "#374151",
-                            }}
-                          >
-                            <span className="w-4 h-4 rounded-full border border-black/10 flex items-center justify-center shrink-0" style={{ backgroundColor: c.hex }}>
-                              {active && <Check className="w-2.5 h-2.5" color={isLight(c.hex) ? "#000000" : "#ffffff"} strokeWidth={3.5} />}
-                            </span>
-                            <span>{c.name}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
+                    <>
+                      {r2Status === "error" && (
+                        <p className="text-xs font-body rounded-lg px-2.5 py-1.5 mb-2 inline-block" style={{ backgroundColor: "#FFF4EE", color: ACCENT.coral }}>
+                          {t.r2ListError}
+                        </p>
+                      )}
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectableColors.map((c) => {
+                          const active = selectedColors.includes(c.name);
+                          return (
+                            <button
+                              key={c.name}
+                              onClick={() => toggleColor(c.name)}
+                              onMouseEnter={() => setHoveredColor(c.hex)}
+                              onMouseLeave={() => setHoveredColor(null)}
+                              className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1.5 rounded-full border text-xs font-body font-medium transition text-left"
+                              style={{
+                                borderColor: active ? "#1a1a1a" : "#e5e7eb",
+                                backgroundColor: active ? "#1a1a1a" : "white",
+                                color: active ? "white" : "#374151",
+                              }}
+                            >
+                              <span className="w-4 h-4 rounded-full border border-black/10 flex items-center justify-center shrink-0" style={{ backgroundColor: c.hex }}>
+                                {active && <Check className="w-2.5 h-2.5" color={isLight(c.hex) ? "#000000" : "#ffffff"} strokeWidth={3.5} />}
+                              </span>
+                              <span>{c.name}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
                   )}
                 </div>
 
