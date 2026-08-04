@@ -26,8 +26,12 @@ const ACCENT = {
 // "https://sezalab-mockup-upload.<hesap>.workers.dev/mockup"
 // Mockuplar bu adresten anahtar (dosya adı) ile otomatik çekilir.
 const R2_BASE_URL = "https://wispy-mountain-cee5.zafer-yildiz4101.workers.dev/mockup";
+const R2_ORIGIN = R2_BASE_URL ? new URL(R2_BASE_URL).origin : null;
 // Worker'ın bucket'taki tüm dosya adlarını JSON dizi olarak döndüren endpoint'i.
-const R2_LIST_URL = R2_BASE_URL ? `${new URL(R2_BASE_URL).origin}/list` : null;
+const R2_LIST_URL = R2_ORIGIN ? `${R2_ORIGIN}/list` : null;
+// Her mockup dosyası için kalibre edilmiş baskı alanı koordinatlarını okuyup yazan endpoint.
+// Worker tarafında GET (oku) ve PUT (tüm haritayı kaydet) desteklemesi gerekir.
+const R2_PLACEMENTS_URL = R2_ORIGIN ? `${R2_ORIGIN}/placements` : null;
 
 function mockupSrcFor(key) {
   if (!R2_BASE_URL) return null;
@@ -78,6 +82,9 @@ const T = {
     chooseTemplateHint: "R2'deki hazır mockuplardan göz atarak hızlıca başla (opsiyonel)",
     templatesEmpty: "R2'de henüz hiç mockup yok",
     editingLabel: "Düzenlenen mockup",
+    placementSaving: "Konum kaydediliyor…",
+    placementSaved: "Konum kaydedildi — bu mockup bir daha hep burada çıkacak",
+    placementSaveError: "Konum kaydedilemedi, sadece bu oturumda geçerli olacak",
     dockLabel: "Aranacak Mockup",
     dockEmpty: "Tüm alanları doldurunca dosya adları burada oluşur",
     ready: "hazır",
@@ -117,6 +124,9 @@ const T = {
     chooseTemplateHint: "Schnellstart durch Stöbern in vorhandenen R2-Mockups (optional)",
     templatesEmpty: "Noch keine Mockups in R2",
     editingLabel: "Bearbeitetes Mockup",
+    placementSaving: "Position wird gespeichert…",
+    placementSaved: "Position gespeichert — dieses Mockup erscheint ab jetzt immer hier",
+    placementSaveError: "Position konnte nicht gespeichert werden, gilt nur für diese Sitzung",
     dockLabel: "Gesuchtes Mockup",
     dockEmpty: "Sobald alle Felder ausgefüllt sind, erscheinen hier die Dateinamen",
     ready: "bereit",
@@ -156,6 +166,9 @@ const T = {
     chooseTemplateHint: "Jump-start by browsing what's already in R2 (optional)",
     templatesEmpty: "No mockups in R2 yet",
     editingLabel: "Editing mockup",
+    placementSaving: "Saving position…",
+    placementSaved: "Position saved — this mockup will always open here from now on",
+    placementSaveError: "Couldn't save position, only applies to this session",
     dockLabel: "Mockup to look up",
     dockEmpty: "Once every field is filled, filenames appear here",
     ready: "ready",
@@ -284,8 +297,13 @@ export default function MockupSelectionScreen() {
   const [designImg, setDesignImg] = useState(null);
   // Gerçek fotoğraflar birbirinden farklı kadrajlanmış olabilir; bu yüzden yerleşim tek bir
   // global değer değil, düzenlenmekte olan mockup dosyasının anahtarına göre ayrı ayrı tutulur.
+  // Kalibre edilen koordinatlar R2 worker'ında kalıcı olarak saklanır (ilk açılışta okunur,
+  // her değişiklikte birkaç saniye sonra otomatik geri yazılır) — böylece bir mockup fotoğrafı
+  // bir kere ayarlandıktan sonra herkes ve her tasarım için otomatik doğru yerde çıkar.
   const [placements, setPlacements] = useState({});
   const [activeEntryKey, setActiveEntryKey] = useState(null);
+  const [placementsSaveStatus, setPlacementsSaveStatus] = useState("idle"); // idle | saving | saved | error
+  const placementsLoadedRef = useRef(false);
   const [hoveredColor, setHoveredColor] = useState(null);
   const [generated, setGenerated] = useState(false);
 
@@ -318,6 +336,50 @@ export default function MockupSelectionScreen() {
       cancelled = true;
     };
   }, []);
+
+  // Sayfa açılışında daha önce kalibre edilmiş yerleşimleri worker'dan çek
+  useEffect(() => {
+    if (!R2_PLACEMENTS_URL) {
+      placementsLoadedRef.current = true;
+      return;
+    }
+    let cancelled = false;
+    fetch(R2_PLACEMENTS_URL)
+      .then((res) => (res.ok ? res.json() : {}))
+      .then((data) => {
+        if (cancelled) return;
+        setPlacements(data && typeof data === "object" ? data : {});
+      })
+      .catch(() => {
+        // Okuma başarısız olursa boş haritayla devam edilir — sürükleme yine çalışır,
+        // sadece o oturumda kalıcı hale gelmez.
+      })
+      .finally(() => {
+        if (!cancelled) placementsLoadedRef.current = true;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Kullanıcı bir mockup'ı sürükleyip bıraktıkça, kısa bir bekleme sonrası otomatik kaydet
+  useEffect(() => {
+    if (!R2_PLACEMENTS_URL || !placementsLoadedRef.current) return;
+    setPlacementsSaveStatus("saving");
+    const timeout = setTimeout(() => {
+      fetch(R2_PLACEMENTS_URL, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(placements),
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error(`save failed: ${res.status}`);
+          setPlacementsSaveStatus("saved");
+        })
+        .catch(() => setPlacementsSaveStatus("error"));
+    }, 900);
+    return () => clearTimeout(timeout);
+  }, [placements]);
 
   const r2Entries = useMemo(() => r2Keys.map(parseMockupKey).filter(Boolean), [r2Keys]);
 
@@ -641,6 +703,16 @@ export default function MockupSelectionScreen() {
                     <p className="text-[11px] font-body text-gray-400 mt-2 flex items-center gap-1">
                       <Move className="w-3 h-3" /> {t.dragHint}
                     </p>
+                    {R2_PLACEMENTS_URL && placementsSaveStatus !== "idle" && (
+                      <p
+                        className="text-[11px] font-body mt-1 flex items-center gap-1"
+                        style={{ color: placementsSaveStatus === "error" ? ACCENT.coral : ACCENT.teal }}
+                      >
+                        {placementsSaveStatus === "saving" && t.placementSaving}
+                        {placementsSaveStatus === "saved" && `✓ ${t.placementSaved}`}
+                        {placementsSaveStatus === "error" && t.placementSaveError}
+                      </p>
+                    )}
                     <div className="mt-3 max-w-xs">
                       <SliderControl
                         label={t.opacity}
