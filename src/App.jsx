@@ -76,8 +76,8 @@ const T = {
     r2ListError: "R2 mockup listesi alınamadı — tüm renkler gösteriliyor, bazıları mevcut olmayabilir.",
     chooseTemplate: "Şablon Seç",
     chooseTemplateHint: "R2'deki hazır mockuplardan göz atarak hızlıca başla (opsiyonel)",
-    colorsAvailable: "renk mevcut",
     templatesEmpty: "R2'de henüz hiç mockup yok",
+    editingLabel: "Düzenlenen mockup",
     dockLabel: "Aranacak Mockup",
     dockEmpty: "Tüm alanları doldurunca dosya adları burada oluşur",
     ready: "hazır",
@@ -115,8 +115,8 @@ const T = {
     r2ListError: "R2-Mockup-Liste konnte nicht geladen werden — alle Farben werden angezeigt, einige sind evtl. nicht verfügbar.",
     chooseTemplate: "Vorlage wählen",
     chooseTemplateHint: "Schnellstart durch Stöbern in vorhandenen R2-Mockups (optional)",
-    colorsAvailable: "Farben verfügbar",
     templatesEmpty: "Noch keine Mockups in R2",
+    editingLabel: "Bearbeitetes Mockup",
     dockLabel: "Gesuchtes Mockup",
     dockEmpty: "Sobald alle Felder ausgefüllt sind, erscheinen hier die Dateinamen",
     ready: "bereit",
@@ -154,8 +154,8 @@ const T = {
     r2ListError: "Couldn't fetch the R2 mockup list — showing all colors, some may not be available.",
     chooseTemplate: "Choose a Template",
     chooseTemplateHint: "Jump-start by browsing what's already in R2 (optional)",
-    colorsAvailable: "colors available",
     templatesEmpty: "No mockups in R2 yet",
+    editingLabel: "Editing mockup",
     dockLabel: "Mockup to look up",
     dockEmpty: "Once every field is filled, filenames appear here",
     ready: "ready",
@@ -282,7 +282,10 @@ export default function MockupSelectionScreen() {
   const [sheetOpen, setSheetOpen] = useState(false);
 
   const [designImg, setDesignImg] = useState(null);
-  const [placement, setPlacement] = useState({ left: PRINT_AREA.left, top: PRINT_AREA.top, width: PRINT_AREA.width, height: PRINT_AREA.height, opacity: 100 });
+  // Gerçek fotoğraflar birbirinden farklı kadrajlanmış olabilir; bu yüzden yerleşim tek bir
+  // global değer değil, düzenlenmekte olan mockup dosyasının anahtarına göre ayrı ayrı tutulur.
+  const [placements, setPlacements] = useState({});
+  const [activeEntryKey, setActiveEntryKey] = useState(null);
   const [hoveredColor, setHoveredColor] = useState(null);
   const [generated, setGenerated] = useState(false);
 
@@ -333,30 +336,28 @@ export default function MockupSelectionScreen() {
 
   const selectableColors = r2Status === "error" ? colors : colors.filter((c) => availableColorNames.has(c.name));
 
-  // R2'deki gerçek dosyaları marka+ürün+pazar yerine göre gruplayıp göz atılabilir şablonlara çevirir
+  // R2'deki her gerçek dosya kendi göz atılabilir şablon kartı olur — gruplanmaz,
+  // böylece aynı marka+ürün altında birden fazla renk/fotoğraf varsa hepsi ayrı ayrı görünür.
   const templates = useMemo(() => {
-    const map = new Map();
-    for (const e of r2Entries) {
-      const id = `${e.brandId}__${e.productId}__${e.marketplace}`;
-      if (!map.has(id)) {
-        map.set(id, { id, brandId: e.brandId, productId: e.productId, marketplace: e.marketplace, colorNames: [], thumbKey: e.key });
-      }
-      map.get(id).colorNames.push(e.color);
-    }
-    return Array.from(map.values()).map((tpl) => ({
-      ...tpl,
-      colorCount: tpl.colorNames.length,
-      thumbSrc: mockupSrcFor(tpl.thumbKey),
-      brandLabel: BRANDS.find((b) => b.id === tpl.brandId)?.label ?? tpl.brandId,
-      productLabel: t.products[tpl.productId] ?? tpl.productId,
-    }));
+    return r2Entries.map((e) => {
+      const paletteKey = `${e.brandId}__${e.productId}`;
+      const hex = COLOR_CATALOG[paletteKey]?.find((c) => c.name === e.color)?.hex ?? "#d4d4d8";
+      return {
+        ...e,
+        hex,
+        thumbSrc: mockupSrcFor(e.key),
+        brandLabel: BRANDS.find((b) => b.id === e.brandId)?.label ?? e.brandId,
+        productLabel: t.products[e.productId] ?? e.productId,
+      };
+    });
   }, [r2Entries, t]);
 
   function handleSelectTemplate(tpl) {
     setBrand(tpl.brandId);
     setProduct(tpl.productId);
     setMarketplace(tpl.marketplace);
-    setSelectedColors([]);
+    setSelectedColors([tpl.color]);
+    setActiveEntryKey(tpl.key);
     setGenerated(false);
   }
 
@@ -382,7 +383,10 @@ export default function MockupSelectionScreen() {
     setGenerated(false);
   }
 
-  const entries = entriesFromR2({ r2Entries, brand, product, marketplace, selectedColors });
+  const entries = useMemo(
+    () => entriesFromR2({ r2Entries, brand, product, marketplace, selectedColors }),
+    [r2Entries, brand, product, marketplace, selectedColors]
+  );
   const dockKeys = entries.map((e) => e.key);
   const isAmazon = marketplace === "amazon";
 
@@ -391,7 +395,27 @@ export default function MockupSelectionScreen() {
   const entriesWithSrc = entries.map((e) => ({ ...e, src: mockupSrcFor(e.key) }));
   const matchedEntries = entriesWithSrc.filter((e) => e.src);
   const missingCount = entries.length - matchedEntries.length;
-  const referenceSrc = entriesWithSrc[0]?.src ?? null;
+
+  // Hangi mockup fotoğrafının şu an düzenlendiğini, seçili renkler değiştikçe geçerli tutar
+  useEffect(() => {
+    setActiveEntryKey((prev) => {
+      if (entries.length === 0) return null;
+      if (prev && entries.some((e) => e.key === prev)) return prev;
+      return entries[0].key;
+    });
+  }, [entries]);
+
+  const activeSrc = entriesWithSrc.find((e) => e.key === activeEntryKey)?.src ?? null;
+
+  function getPlacement(key) {
+    const k = key ?? "__default__";
+    return placements[k] ?? placements.__default__ ?? DEFAULT_PLACEMENT;
+  }
+  function setPlacementFor(key, next) {
+    const k = key ?? "__default__";
+    setPlacements((prev) => ({ ...prev, [k]: next }));
+  }
+
   const lastSelectedHex = selectedColors.length
     ? colors.find((c) => c.name === selectedColors[selectedColors.length - 1])?.hex
     : null;
@@ -526,16 +550,19 @@ export default function MockupSelectionScreen() {
               ) : templates.length === 0 ? (
                 <p className="text-sm font-body text-gray-400 italic">{t.templatesEmpty}</p>
               ) : (
-                <div className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1">
+                <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
                   {templates.map((tpl) => {
-                    const active = brand === tpl.brandId && product === tpl.productId && marketplace === tpl.marketplace;
+                    const active =
+                      brand === tpl.brandId &&
+                      product === tpl.productId &&
+                      marketplace === tpl.marketplace &&
+                      selectedColors.includes(tpl.color);
                     return (
                       <TemplateCard
-                        key={tpl.id}
+                        key={tpl.key}
                         tpl={tpl}
                         active={active}
                         onClick={() => handleSelectTemplate(tpl)}
-                        t={t}
                       />
                     );
                   })}
@@ -582,12 +609,33 @@ export default function MockupSelectionScreen() {
 
                 {designImg && (
                   <div>
+                    {entriesWithSrc.length > 1 && (
+                      <div className="mb-2">
+                        <p className="text-[10px] font-mono2 uppercase tracking-wide text-gray-400 mb-1">{t.editingLabel}</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {entriesWithSrc.map((e) => (
+                            <button
+                              key={e.key}
+                              onClick={() => setActiveEntryKey(e.key)}
+                              className="px-2 py-1 rounded-full text-[11px] font-body font-medium border transition"
+                              style={{
+                                borderColor: activeEntryKey === e.key ? ACCENT.violet : "#e5e7eb",
+                                backgroundColor: activeEntryKey === e.key ? ACCENT.violet : "white",
+                                color: activeEntryKey === e.key ? "white" : "#374151",
+                              }}
+                            >
+                              {e.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <DesignPlacer
                       designSrc={designImg}
-                      referenceSrc={referenceSrc}
+                      referenceSrc={activeSrc}
                       tshirtColor={previewHex}
-                      placement={placement}
-                      onChange={setPlacement}
+                      placement={getPlacement(activeEntryKey)}
+                      onChange={(next) => setPlacementFor(activeEntryKey, next)}
                       t={t}
                     />
                     <p className="text-[11px] font-body text-gray-400 mt-2 flex items-center gap-1">
@@ -596,8 +644,8 @@ export default function MockupSelectionScreen() {
                     <div className="mt-3 max-w-xs">
                       <SliderControl
                         label={t.opacity}
-                        value={placement.opacity}
-                        onChange={(v) => setPlacement((p) => ({ ...p, opacity: v }))}
+                        value={getPlacement(activeEntryKey).opacity}
+                        onChange={(v) => setPlacementFor(activeEntryKey, { ...getPlacement(activeEntryKey), opacity: v })}
                         accent={ACCENT.teal}
                       />
                     </div>
@@ -702,7 +750,7 @@ export default function MockupSelectionScreen() {
                     label={e.label}
                     mockupSrc={e.src}
                     designSrc={designImg}
-                    placement={placement}
+                    placement={getPlacement(e.key)}
                     t={t}
                   />
                 ))}
@@ -789,40 +837,34 @@ function Chip({ active, accent, onClick, children }) {
   );
 }
 
-// R2'de gerçekten var olan bir marka+ürün+pazar yeri kombinasyonunu önizleyip tek tıkla seçtiren kart
-function TemplateCard({ tpl, active, onClick, t }) {
+// R2'de gerçekten var olan tek bir mockup dosyasını önizleyip tek tıkla seçtiren küçük kart
+function TemplateCard({ tpl, active, onClick }) {
   const [imgFailed, setImgFailed] = useState(false);
 
   return (
     <button
       onClick={onClick}
-      className="shrink-0 w-32 text-left rounded-xl border overflow-hidden transition"
+      className="shrink-0 w-20 text-left rounded-lg border overflow-hidden transition"
       style={{ borderColor: active ? ACCENT.violet : "#e5e7eb", boxShadow: active ? `0 0 0 2px ${ACCENT.violet}` : "none" }}
     >
-      <div className="w-32 h-32 bg-gray-100 flex items-center justify-center overflow-hidden">
+      <div className="w-20 h-20 bg-gray-100 flex items-center justify-center overflow-hidden">
         {tpl.thumbSrc && !imgFailed ? (
           <img
             src={tpl.thumbSrc}
-            alt={tpl.brandLabel}
+            alt={tpl.color}
             className="w-full h-full object-cover"
             onError={() => setImgFailed(true)}
           />
         ) : (
-          <ImageOff className="w-5 h-5 text-gray-300" />
+          <ImageOff className="w-4 h-4 text-gray-300" />
         )}
       </div>
-      <div className="p-2">
-        <p className="font-display font-semibold text-xs text-gray-900 truncate">{tpl.brandLabel}</p>
-        <p className="font-body text-[11px] text-gray-500 truncate">{tpl.productLabel}</p>
-        <div className="flex items-center justify-between mt-1">
-          <span className="font-mono2 text-[10px] text-gray-400">{tpl.colorCount} {t.colorsAvailable}</span>
-          <span
-            className="font-mono2 text-[9px] uppercase px-1.5 py-0.5 rounded-full"
-            style={{ backgroundColor: "#F3F0FF", color: ACCENT.violet }}
-          >
-            {t.marketplaces[tpl.marketplace]}
-          </span>
+      <div className="p-1.5">
+        <div className="flex items-center gap-1">
+          <span className="w-2.5 h-2.5 rounded-full border border-black/10 shrink-0" style={{ backgroundColor: tpl.hex }} />
+          <p className="font-display font-semibold text-[11px] text-gray-900 truncate">{tpl.color}</p>
         </div>
+        <p className="font-body text-[9px] text-gray-400 truncate">{tpl.brandLabel}</p>
       </div>
     </button>
   );
@@ -880,6 +922,7 @@ function TShirtSilhouette({ color }) {
 const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 // Standart göğüs baskı alanı — kullanıcı tasarımı bu alana hizalayarak başlar
 const PRINT_AREA = { left: 33, top: 38, width: 34, height: 34 };
+const DEFAULT_PLACEMENT = { left: PRINT_AREA.left, top: PRINT_AREA.top, width: PRINT_AREA.width, height: PRINT_AREA.height, opacity: 100 };
 const HANDLE_CURSOR = {
   nw: "nwse-resize", se: "nwse-resize",
   ne: "nesw-resize", sw: "nesw-resize",
