@@ -1190,10 +1190,7 @@ const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockup
 // ============================================================
 export default function App() {
   const [currentUser, setCurrentUser] = useState(() => getCurrentUser());
-<<<<<<< HEAD
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
-=======
->>>>>>> origin/main
 
   if (!currentUser) {
     return (
@@ -1241,7 +1238,6 @@ export default function App() {
             </span>
           )}
         </div>
-<<<<<<< HEAD
 
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
           {currentUser.role === "admin" && (
@@ -1303,36 +1299,6 @@ export default function App() {
       {/* Admin Panel Modal */}
       {adminPanelOpen && <AdminPanel onClose={() => setAdminPanelOpen(false)} />}
 
-=======
-        <button
-          onClick={handleLogout}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-            padding: "6px 12px",
-            background: "rgba(255,255,255,0.15)",
-            border: "none",
-            color: "white",
-            borderRadius: "6px",
-            cursor: "pointer",
-            fontSize: "13px",
-            fontWeight: "500",
-            transition: "all 200ms",
-          }}
-          onMouseEnter={(e) => {
-            e.target.style.background = "rgba(255,255,255,0.25)";
-          }}
-          onMouseLeave={(e) => {
-            e.target.style.background = "rgba(255,255,255,0.15)";
-          }}
-        >
-          <LogOut size={16} />
-          Logout
-        </button>
-      </div>
-
->>>>>>> origin/main
       {/* Main App */}
       <MockupStudio />
     </div>
