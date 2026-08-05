@@ -13,7 +13,10 @@ import {
   Sparkles,
   Move,
   Folder,
+  LogOut,
 } from "lucide-react";
+import { LoginPage } from "./LoginPage";
+import { getCurrentUser, logout, getUserR2Path } from "./auth";
 
 // ============================================================
 // Design tokens: coral / teal / violet / yellow
@@ -212,7 +215,7 @@ function readFileAsDataURL(file) {
   });
 }
 
-export default function MockupSelectionScreen() {
+function MockupStudio() {
   const [lang, setLang] = useState("en");
   const [langOpen, setLangOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -1180,3 +1183,89 @@ const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockup
     </div>
   );
 });
+
+// ============================================================
+// Main App Component with Auth
+// ============================================================
+export default function App() {
+  const [currentUser, setCurrentUser] = useState(() => getCurrentUser());
+
+  if (!currentUser) {
+    return (
+      <LoginPage
+        onLoginSuccess={(user) => {
+          setCurrentUser(user);
+        }}
+      />
+    );
+  }
+
+  const handleLogout = () => {
+    logout();
+    setCurrentUser(null);
+  };
+
+  return (
+    <div>
+      {/* User Header */}
+      <div
+        style={{
+          background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+          color: "white",
+          padding: "12px 20px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          fontSize: "14px",
+          borderBottom: "1px solid rgba(0,0,0,0.1)",
+        }}
+      >
+        <div>
+          <span style={{ fontWeight: "600" }}>👤 {currentUser.name}</span>
+          {currentUser.role === "admin" && (
+            <span
+              style={{
+                marginLeft: "8px",
+                padding: "2px 8px",
+                background: "rgba(255,255,255,0.2)",
+                borderRadius: "4px",
+                fontSize: "12px",
+              }}
+            >
+              Admin
+            </span>
+          )}
+        </div>
+        <button
+          onClick={handleLogout}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: "6px 12px",
+            background: "rgba(255,255,255,0.15)",
+            border: "none",
+            color: "white",
+            borderRadius: "6px",
+            cursor: "pointer",
+            fontSize: "13px",
+            fontWeight: "500",
+            transition: "all 200ms",
+          }}
+          onMouseEnter={(e) => {
+            e.target.style.background = "rgba(255,255,255,0.25)";
+          }}
+          onMouseLeave={(e) => {
+            e.target.style.background = "rgba(255,255,255,0.15)";
+          }}
+        >
+          <LogOut size={16} />
+          Logout
+        </button>
+      </div>
+
+      {/* Main App */}
+      <MockupStudio />
+    </div>
+  );
+}
