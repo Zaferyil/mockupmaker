@@ -1,9 +1,9 @@
 // Hardcoded users - production'da database'e taşıyabilir
 export const USERS = {
-  "zafer@example.com": {
+  "zaferyildiz.tr@hotmail.com": {
     id: "user_zafer",
     name: "zyildiz (Admin)",
-    email: "zafer@example.com",
+    email: "zaferyildiz.tr@hotmail.com",
     role: "admin",
     password: "Seza02643637218", // Demo için - production'da hashing
     createdAt: "2026-08-05"
