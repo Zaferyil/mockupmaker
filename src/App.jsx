@@ -107,7 +107,6 @@ const T = {
     placementSaving: "Konum kaydediliyor…",
     placementSaved: "Konum kaydedildi — bu mockup bir daha hep burada çıkacak",
     placementSaveError: "Konum kaydedilemedi, sadece bu oturumda geçerli olacak",
-    printArea: "Baskı Alanı",
     opacity: "Opaklık",
     download: "İndir",
     downloadAll: "Tümünü İndir (ZIP)",
@@ -150,7 +149,6 @@ const T = {
     placementSaving: "Position wird gespeichert…",
     placementSaved: "Position gespeichert — dieses Mockup erscheint ab jetzt immer hier",
     placementSaveError: "Position konnte nicht gespeichert werden, gilt nur für diese Sitzung",
-    printArea: "Druckbereich",
     opacity: "Deckkraft",
     download: "Herunterladen",
     downloadAll: "Alle herunterladen (ZIP)",
@@ -193,7 +191,6 @@ const T = {
     placementSaving: "Saving position…",
     placementSaved: "Position saved — this mockup will always open here from now on",
     placementSaveError: "Couldn't save position, only applies to this session",
-    printArea: "Print Area",
     opacity: "Opacity",
     download: "Download",
     downloadAll: "Download All (ZIP)",
@@ -689,7 +686,6 @@ export default function MockupSelectionScreen() {
                       tshirtColor="#d4d4d8"
                       placement={getPlacement(activeEntryKey)}
                       onChange={(next) => setPlacementFor(activeEntryKey, next)}
-                      t={t}
                     />
                     <p className="text-[11px] font-body text-gray-400 mt-2 flex items-center gap-1">
                       <Move className="w-3 h-3" /> {t.dragHint}
@@ -936,9 +932,8 @@ function TShirtSilhouette({ color }) {
 }
 
 const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
-// Standart göğüs baskı alanı — kullanıcı tasarımı bu alana hizalayarak başlar
-const PRINT_AREA = { left: 33, top: 38, width: 34, height: 34 };
-const DEFAULT_PLACEMENT = { left: PRINT_AREA.left, top: PRINT_AREA.top, width: PRINT_AREA.width, height: PRINT_AREA.height, opacity: 100 };
+// Yeni bir mockup ilk kez düzenlenirken tasarımın başlayacağı standart göğüs konumu
+const DEFAULT_PLACEMENT = { left: 33, top: 38, width: 34, height: 34, opacity: 100 };
 const HANDLE_CURSOR = {
   nw: "nwse-resize", se: "nwse-resize",
   ne: "nesw-resize", sw: "nesw-resize",
@@ -952,7 +947,7 @@ const HANDLE_POS = {
 };
 
 // Fare ile sürükle/boyutlandır — Design & Yerleşim adımındaki canlı önizleme
-function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChange, t }) {
+function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChange }) {
   const containerRef = useRef(null);
   const dragRef = useRef(null);
   const [refFailed, setRefFailed] = useState(false);
@@ -1021,25 +1016,6 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
       ) : (
         <TShirtSilhouette color={tshirtColor} />
       )}
-
-      {/* Sabit baskı alanı kılavuzu — tasarım kutusundan bağımsız, her zaman görünür */}
-      <div
-        className="absolute border border-dashed pointer-events-none"
-        style={{
-          left: `${PRINT_AREA.left}%`,
-          top: `${PRINT_AREA.top}%`,
-          width: `${PRINT_AREA.width}%`,
-          height: `${PRINT_AREA.height}%`,
-          borderColor: "rgba(0,0,0,0.35)",
-        }}
-      >
-        <span
-          className="absolute -top-5 left-0 text-[9px] font-mono2 uppercase tracking-wide px-1.5 py-0.5 rounded"
-          style={{ backgroundColor: "rgba(0,0,0,0.55)", color: "white" }}
-        >
-          {t.printArea}
-        </span>
-      </div>
 
       {designSrc && (
         <div
