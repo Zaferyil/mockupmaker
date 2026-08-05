@@ -48,16 +48,19 @@ function safeFileName(key) {
 
 // R2 anahtarını klasör + dosyaya ayırır. Kullanıcı R2'de istediği isimde klasörler açar,
 // mockupları içine atar — dosya adında hiçbir kalıp zorunluluğu yoktur.
+// SADECE klasör içindeki görseller mockup sayılır: kökteki dosyalar kasıtlı olarak yok
+// sayılır (bucket'ın köküne uygulamayla ilgisiz görseller de yükleniyor).
 // "_" ile başlayan dosya/klasörler (örn. _placements.json) sistem dosyasıdır, atlanır.
 function classifyKey(key) {
   const parts = key.split("/");
+  if (parts.length < 2) return null; // kök dosya → mockup değil
   const file = parts[parts.length - 1];
   const folder = parts.slice(0, -1).join("/");
   if (file.startsWith("_") || parts[0].startsWith("_")) return null;
   if (!/\.(png|webp|jpe?g)$/i.test(file)) return null;
   return {
     key,
-    folder, // "" = kök (klasörsüz)
+    folder,
     label: file.replace(/\.(png|webp|jpe?g)$/i, ""),
   };
 }
@@ -81,7 +84,6 @@ const T = {
     stepDesign: "Tasarım & Yerleşim",
     results: "Sonuçlar",
     folderPlaceholder: "Bir klasör seç…",
-    rootFolder: "Klasörsüz (ana dizin)",
     folderHint: "R2'de açtığın her klasör burada otomatik listelenir — yeni mockuplar yüklemek için yeterli",
     folderEmpty: "Bu klasörde henüz mockup yok",
     noFoldersYet: "R2'de henüz hiç mockup yok — bir klasör açıp içine görselleri yükle",
@@ -125,7 +127,6 @@ const T = {
     stepDesign: "Design & Platzierung",
     results: "Ergebnisse",
     folderPlaceholder: "Ordner wählen…",
-    rootFolder: "Ohne Ordner (Hauptverzeichnis)",
     folderHint: "Jeder in R2 angelegte Ordner erscheint hier automatisch — einfach neue Mockups hochladen",
     folderEmpty: "In diesem Ordner sind noch keine Mockups",
     noFoldersYet: "Noch keine Mockups in R2 — einen Ordner anlegen und Bilder hochladen",
@@ -169,7 +170,6 @@ const T = {
     stepDesign: "Design & Placement",
     results: "Results",
     folderPlaceholder: "Choose a folder…",
-    rootFolder: "No folder (root)",
     folderHint: "Every folder you create in R2 shows up here automatically — just upload new mockups",
     folderEmpty: "No mockups in this folder yet",
     noFoldersYet: "No mockups in R2 yet — create a folder and upload images into it",
@@ -330,17 +330,13 @@ export default function MockupSelectionScreen() {
       if (!map.has(item.folder)) map.set(item.folder, []);
       map.get(item.folder).push(item);
     }
-    // Her klasörün içi alfabetik; klasör listesi de alfabetik, kök ("") en sonda
+    // Her klasörün içi de klasör listesi de alfabetik
     const list = Array.from(map.entries()).map(([folder, items]) => ({
       folder,
       items: items.sort((a, b) => a.label.localeCompare(b.label)),
       thumbSrc: mockupSrcFor(items[0].key),
     }));
-    list.sort((a, b) => {
-      if (a.folder === "") return 1;
-      if (b.folder === "") return -1;
-      return a.folder.localeCompare(b.folder);
-    });
+    list.sort((a, b) => a.folder.localeCompare(b.folder));
     return list;
   }, [r2Keys]);
 
@@ -354,7 +350,7 @@ export default function MockupSelectionScreen() {
   }, [folders, selectedFolder]);
 
   function folderDisplayName(folder) {
-    return folder === "" ? t.rootFolder : folder;
+    return folder;
   }
 
   function toggleKey(key) {
