@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Lock, Mail, AlertCircle } from "lucide-react";
 import { login } from "./auth";
-import { USERS } from "./users";
 
 const ACCENT = {
   coral: "#FF5A36",
@@ -29,12 +28,6 @@ export function LoginPage({ onLoginSuccess }) {
       setIsLoading(false);
     }
   };
-
-  const demoAccounts = Object.entries(USERS).map(([email, user]) => ({
-    email,
-    password: user.password,
-    name: user.name,
-  }));
 
   return (
     <div
@@ -206,79 +199,6 @@ export function LoginPage({ onLoginSuccess }) {
           </button>
         </form>
 
-        {/* Divider */}
-        <div
-          style={{
-            height: "1px",
-            background: "#e5e7eb",
-            margin: "24px 0",
-          }}
-        />
-
-        {/* Demo Accounts */}
-        <div style={{ marginBottom: "20px" }}>
-          <p
-            style={{
-              fontSize: "13px",
-              fontWeight: "600",
-              color: "#6b7280",
-              margin: "0 0 12px 0",
-              textTransform: "uppercase",
-              letterSpacing: "0.5px",
-            }}
-          >
-            Demo Accounts
-          </p>
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-            {demoAccounts.map((account) => (
-              <button
-                key={account.email}
-                type="button"
-                onClick={() => {
-                  setEmail(account.email);
-                  setPassword(account.password);
-                }}
-                style={{
-                  padding: "10px 12px",
-                  background: "#f3f4f6",
-                  border: "1px solid #e5e7eb",
-                  borderRadius: "8px",
-                  cursor: "pointer",
-                  fontSize: "13px",
-                  textAlign: "left",
-                  transition: "all 200ms",
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.background = "#e5e7eb";
-                  e.target.style.borderColor = ACCENT.teal;
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.background = "#f3f4f6";
-                  e.target.style.borderColor = "#e5e7eb";
-                }}
-              >
-                <div style={{ fontWeight: "600", color: "#111827" }}>
-                  {account.name}
-                </div>
-                <div style={{ fontSize: "12px", color: "#9ca3af" }}>
-                  {account.email}
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Footer */}
-        <p
-          style={{
-            fontSize: "12px",
-            color: "#9ca3af",
-            textAlign: "center",
-            margin: "0",
-          }}
-        >
-          Demo version • All accounts use demo data
-        </p>
       </div>
     </div>
   );

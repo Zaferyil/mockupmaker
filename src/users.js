@@ -2,26 +2,10 @@
 export const USERS = {
   "zafer@example.com": {
     id: "user_zafer",
-    name: "Zafer (Admin)",
+    name: "zyildiz (Admin)",
     email: "zafer@example.com",
     role: "admin",
-    password: "admin123", // Demo için - production'da hashing
-    createdAt: "2026-08-05"
-  },
-  "customer1@example.com": {
-    id: "user_1",
-    name: "Customer 1",
-    email: "customer1@example.com",
-    role: "user",
-    password: "password123",
-    createdAt: "2026-08-05"
-  },
-  "customer2@example.com": {
-    id: "user_2",
-    name: "Customer 2",
-    email: "customer2@example.com",
-    role: "user",
-    password: "password123",
+    password: "Seza02643637218", // Demo için - production'da hashing
     createdAt: "2026-08-05"
   },
 };
