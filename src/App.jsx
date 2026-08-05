@@ -16,6 +16,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { LoginPage } from "./LoginPage";
+import { AdminPanel } from "./AdminPanel";
 import { getCurrentUser, logout, getUserR2Path } from "./auth";
 
 // ============================================================
@@ -1189,6 +1190,7 @@ const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockup
 // ============================================================
 export default function App() {
   const [currentUser, setCurrentUser] = useState(() => getCurrentUser());
+  const [adminPanelOpen, setAdminPanelOpen] = useState(false);
 
   if (!currentUser) {
     return (
@@ -1236,33 +1238,66 @@ export default function App() {
             </span>
           )}
         </div>
-        <button
-          onClick={handleLogout}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-            padding: "6px 12px",
-            background: "rgba(255,255,255,0.15)",
-            border: "none",
-            color: "white",
-            borderRadius: "6px",
-            cursor: "pointer",
-            fontSize: "13px",
-            fontWeight: "500",
-            transition: "all 200ms",
-          }}
-          onMouseEnter={(e) => {
-            e.target.style.background = "rgba(255,255,255,0.25)";
-          }}
-          onMouseLeave={(e) => {
-            e.target.style.background = "rgba(255,255,255,0.15)";
-          }}
-        >
-          <LogOut size={16} />
-          Logout
-        </button>
+
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          {currentUser.role === "admin" && (
+            <button
+              onClick={() => setAdminPanelOpen(true)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "6px 12px",
+                background: "rgba(255,255,255,0.15)",
+                border: "none",
+                color: "white",
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontSize: "13px",
+                fontWeight: "500",
+                transition: "all 200ms",
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.background = "rgba(255,255,255,0.25)";
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.background = "rgba(255,255,255,0.15)";
+              }}
+            >
+              ⚙️ Admin Panel
+            </button>
+          )}
+          <button
+            onClick={handleLogout}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "6px 12px",
+              background: "rgba(255,255,255,0.15)",
+              border: "none",
+              color: "white",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontSize: "13px",
+              fontWeight: "500",
+              transition: "all 200ms",
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.background = "rgba(255,255,255,0.25)";
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.background = "rgba(255,255,255,0.15)";
+            }}
+          >
+            <LogOut size={16} />
+            Logout
+          </button>
+        </div>
       </div>
+
+      {/* Admin Panel Modal */}
+      {adminPanelOpen && <AdminPanel onClose={() => setAdminPanelOpen(false)} />}
 
       {/* Main App */}
       <MockupStudio />
