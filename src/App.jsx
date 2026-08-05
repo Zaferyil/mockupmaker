@@ -932,8 +932,9 @@ function TShirtSilhouette({ color }) {
 }
 
 const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+const PRINT_AREA = { left: 33, top: 38, width: 34, height: 34 };
 // Yeni bir mockup ilk kez düzenlenirken tasarımın başlayacağı standart göğüs konumu
-const DEFAULT_PLACEMENT = { left: 33, top: 38, width: 34, height: 34, opacity: 100 };
+const DEFAULT_PLACEMENT = { left: PRINT_AREA.left, top: PRINT_AREA.top, width: PRINT_AREA.width, height: PRINT_AREA.height, opacity: 100 };
 const HANDLE_CURSOR = {
   nw: "nwse-resize", se: "nwse-resize",
   ne: "nesw-resize", sw: "nesw-resize",
