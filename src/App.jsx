@@ -1017,6 +1017,19 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
         <TShirtSilhouette color={tshirtColor} />
       )}
 
+      {/* Print Area reference (hidden for visual cleanliness) — kept for coordinate system */}
+      <div
+        className="absolute border border-dashed pointer-events-none"
+        style={{
+          left: `${PRINT_AREA.left}%`,
+          top: `${PRINT_AREA.top}%`,
+          width: `${PRINT_AREA.width}%`,
+          height: `${PRINT_AREA.height}%`,
+          borderColor: "rgba(0,0,0,0)",
+          display: "none",
+        }}
+      />
+
       {designSrc && (
         <div
           onPointerDown={(e) => startDrag("move", e)}
