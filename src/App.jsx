@@ -5,12 +5,14 @@ import {
   Shirt,
   Globe,
   ChevronUp,
+  ChevronDown,
   X,
   Upload,
   Download,
   ImageOff,
   Sparkles,
   Move,
+  Folder,
 } from "lucide-react";
 
 // ============================================================
@@ -31,28 +33,33 @@ const R2_ORIGIN = R2_BASE_URL ? new URL(R2_BASE_URL).origin : null;
 // Worker'ın bucket'taki tüm dosya adlarını JSON dizi olarak döndüren endpoint'i.
 const R2_LIST_URL = R2_ORIGIN ? `${R2_ORIGIN}/list` : null;
 // Her mockup dosyası için kalibre edilmiş baskı alanı koordinatlarını okuyup yazan endpoint.
-// Worker tarafında GET (oku) ve PUT (tüm haritayı kaydet) desteklemesi gerekir.
 const R2_PLACEMENTS_URL = R2_ORIGIN ? `${R2_ORIGIN}/placements` : null;
 
 function mockupSrcFor(key) {
   if (!R2_BASE_URL) return null;
-  return `${R2_BASE_URL}/${encodeURIComponent(key)}`;
+  // Klasörlü anahtarlarda "/" korunmalı, sadece segmentler encode edilmeli
+  return `${R2_BASE_URL}/${key.split("/").map(encodeURIComponent).join("/")}`;
 }
 
-// Dosya adını "{Brand-Slug}_{Renk}_{Ürün}[_White-BG].png" kalıbından geri çözer.
-function parseMockupKey(key) {
-  const parts = key.replace(/\.png$/i, "").split("_");
-  let isAmazon = false;
-  if (parts[parts.length - 1] === "White-BG") {
-    isAmazon = true;
-    parts.pop();
-  }
-  if (parts.length !== 3) return null;
-  const [brandSlug, color, productLabel] = parts;
-  const brand = BRANDS.find((b) => b.label.replace(/\s+/g, "-") === brandSlug);
-  const productId = Object.keys(PRODUCT_FILE_LABELS).find((id) => PRODUCT_FILE_LABELS[id] === productLabel);
-  if (!brand || !productId) return null;
-  return { key, brandId: brand.id, color, productId, marketplace: isAmazon ? "amazon" : "etsy" };
+// İndirme/zip için güvenli dosya adı: "GM013/Pepper.png" -> "GM013_Pepper.png"
+function safeFileName(key) {
+  return key.replace(/\//g, "_");
+}
+
+// R2 anahtarını klasör + dosyaya ayırır. Kullanıcı R2'de istediği isimde klasörler açar,
+// mockupları içine atar — dosya adında hiçbir kalıp zorunluluğu yoktur.
+// "_" ile başlayan dosya/klasörler (örn. _placements.json) sistem dosyasıdır, atlanır.
+function classifyKey(key) {
+  const parts = key.split("/");
+  const file = parts[parts.length - 1];
+  const folder = parts.slice(0, -1).join("/");
+  if (file.startsWith("_") || parts[0].startsWith("_")) return null;
+  if (!/\.(png|webp|jpe?g)$/i.test(file)) return null;
+  return {
+    key,
+    folder, // "" = kök (klasörsüz)
+    label: file.replace(/\.(png|webp|jpe?g)$/i, ""),
+  };
 }
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -67,221 +74,137 @@ const LANGS = [
 const T = {
   tr: {
     brand: "SeZaLab",
-    title: "Mockup Seçim Fişi",
-    subtitle: "Ürün, marka, pazar yeri ve rengi seç — mockup dosya adı otomatik oluşsun",
-    step1: "Ürün Tipi",
-    step2: "Blank Marka",
-    step3: "Pazar Yeri",
-    step4: "Renk",
-    step5: "Tasarım & Yerleşim",
-    amazonWarning: "Amazon seçildi → sadece beyaz arka planlı mockuplar kullanılır",
-    chooseBrandFirst: "Önce blank marka ve ürün tipi seç",
-    noColorsYet: "Bu kombinasyon için R2'de henüz mockup yok",
+    title: "Mockup Stüdyosu",
+    subtitle: "Klasörünü seç, mockupları işaretle, tasarımını yerleştir — indir",
+    stepFolder: "Mockup Klasörü",
+    stepMockups: "Mockuplar",
+    stepDesign: "Tasarım & Yerleşim",
+    results: "Sonuçlar",
+    folderPlaceholder: "Bir klasör seç…",
+    rootFolder: "Klasörsüz (ana dizin)",
+    folderHint: "R2'de açtığın her klasör burada otomatik listelenir — yeni mockuplar yüklemek için yeterli",
+    folderEmpty: "Bu klasörde henüz mockup yok",
+    noFoldersYet: "R2'de henüz hiç mockup yok — bir klasör açıp içine görselleri yükle",
+    selectMockupsHint: "Tasarım eklemek istediğin mockuplara tıkla (birden fazla seçebilirsin)",
+    selectAll: "Tümünü Seç",
+    clearSelection: "Temizle",
+    selectedWord: "seçili",
+    mockupsWord: "mockup",
+    chooseFolderFirst: "Önce yukarıdan bir klasör seç",
+    selectMockupFirst: "Önce en az bir mockup seç",
     r2Loading: "R2'deki mockuplar taranıyor…",
-    r2ListError: "R2 mockup listesi alınamadı — tüm renkler gösteriliyor, bazıları mevcut olmayabilir.",
-    chooseTemplate: "Şablon Seç",
-    chooseTemplateHint: "R2'deki hazır mockuplardan göz atarak hızlıca başla (opsiyonel)",
-    templatesEmpty: "R2'de henüz hiç mockup yok",
+    r2ListError: "R2 mockup listesi alınamadı — sayfayı yenilemeyi dene.",
+    dockLabel: "Seçilen Mockuplar",
+    dockEmpty: "Mockup seçtikçe dosya adları burada listelenir",
+    ready: "seçili",
+    uploadDesign: "Tasarımı Yükle",
+    changeDesign: "Tasarımı Değiştir",
+    uploadDesignHint: "Şeffaf arka planlı PNG önerilir",
+    dragHint: "Tasarımı sürükleyerek konumlandır, köşelerden tutup boyutlandır",
     editingLabel: "Düzenlenen mockup",
     placementSaving: "Konum kaydediliyor…",
     placementSaved: "Konum kaydedildi — bu mockup bir daha hep burada çıkacak",
     placementSaveError: "Konum kaydedilemedi, sadece bu oturumda geçerli olacak",
-    dockLabel: "Aranacak Mockup",
-    dockEmpty: "Tüm alanları doldurunca dosya adları burada oluşur",
-    ready: "hazır",
-    finishSelectionFirst: "Önce ürün, marka, pazar yeri ve en az bir renk seç",
-    uploadDesign: "Tasarımı Yükle",
-    changeDesign: "Tasarımı Değiştir",
-    uploadDesignHint: "Şeffaf arka planlı PNG önerilir",
-    dragHint: "Tasarımı sürükleyerek konumlandır, alt-sağ köşeden tutup boyutlandır",
     printArea: "Baskı Alanı",
     opacity: "Opaklık",
     download: "İndir",
     downloadAll: "Tümünü İndir (ZIP)",
     zippingAll: "ZIP hazırlanıyor…",
     zipError: "ZIP oluşturulamadı, tek tek indirmeyi dene",
-    mockupMissing: "R2'de bulunamadı",
-    r2NotConfigured: "R2 bağlantısı henüz kurulmadı — mockuplar depodan otomatik gelemiyor. Worker adresini R2_BASE_URL'e girince, seçtiğin her renk için mockup otomatik yüklenecek.",
+    mockupMissing: "Görsel yüklenemedi",
+    r2NotConfigured: "R2 bağlantısı henüz kurulmadı — Worker adresini R2_BASE_URL'e girince mockuplar otomatik gelecek.",
     generateMockups: "Mockupları Oluştur",
-    results: "Sonuçlar",
     missingCount: "eksik mockup",
-    referencePlaceholder: "Önizleme — gerçek mockup R2 bağlanınca burada görünecek",
-    products: { tshirt: "Tişört", sweatshirt: "Sweatshirt", hoody: "Hoody" },
-    marketplaces: { amazon: "Amazon", etsy: "Etsy" },
   },
   de: {
     brand: "SeZaLab",
-    title: "Mockup Auswahlbeleg",
-    subtitle: "Produkt, Marke, Marktplatz und Farbe wählen — der Dateiname entsteht automatisch",
-    step1: "Produkttyp",
-    step2: "Blank-Marke",
-    step3: "Marktplatz",
-    step4: "Farbe",
-    step5: "Design & Platzierung",
-    amazonWarning: "Amazon gewählt → es werden nur Mockups mit weißem Hintergrund verwendet",
-    chooseBrandFirst: "Zuerst Blank-Marke und Produkttyp wählen",
-    noColorsYet: "Für diese Kombination gibt es noch keine Mockups in R2",
+    title: "Mockup-Studio",
+    subtitle: "Ordner wählen, Mockups markieren, Design platzieren — herunterladen",
+    stepFolder: "Mockup-Ordner",
+    stepMockups: "Mockups",
+    stepDesign: "Design & Platzierung",
+    results: "Ergebnisse",
+    folderPlaceholder: "Ordner wählen…",
+    rootFolder: "Ohne Ordner (Hauptverzeichnis)",
+    folderHint: "Jeder in R2 angelegte Ordner erscheint hier automatisch — einfach neue Mockups hochladen",
+    folderEmpty: "In diesem Ordner sind noch keine Mockups",
+    noFoldersYet: "Noch keine Mockups in R2 — einen Ordner anlegen und Bilder hochladen",
+    selectMockupsHint: "Mockups anklicken, die das Design bekommen sollen (Mehrfachauswahl möglich)",
+    selectAll: "Alle auswählen",
+    clearSelection: "Leeren",
+    selectedWord: "ausgewählt",
+    mockupsWord: "Mockups",
+    chooseFolderFirst: "Zuerst oben einen Ordner wählen",
+    selectMockupFirst: "Zuerst mindestens ein Mockup auswählen",
     r2Loading: "Mockups in R2 werden durchsucht…",
-    r2ListError: "R2-Mockup-Liste konnte nicht geladen werden — alle Farben werden angezeigt, einige sind evtl. nicht verfügbar.",
-    chooseTemplate: "Vorlage wählen",
-    chooseTemplateHint: "Schnellstart durch Stöbern in vorhandenen R2-Mockups (optional)",
-    templatesEmpty: "Noch keine Mockups in R2",
+    r2ListError: "R2-Mockup-Liste konnte nicht geladen werden — Seite neu laden.",
+    dockLabel: "Ausgewählte Mockups",
+    dockEmpty: "Ausgewählte Dateinamen erscheinen hier",
+    ready: "ausgewählt",
+    uploadDesign: "Design hochladen",
+    changeDesign: "Design ändern",
+    uploadDesignHint: "PNG mit transparentem Hintergrund empfohlen",
+    dragHint: "Design per Ziehen positionieren, an den Ecken skalieren",
     editingLabel: "Bearbeitetes Mockup",
     placementSaving: "Position wird gespeichert…",
     placementSaved: "Position gespeichert — dieses Mockup erscheint ab jetzt immer hier",
     placementSaveError: "Position konnte nicht gespeichert werden, gilt nur für diese Sitzung",
-    dockLabel: "Gesuchtes Mockup",
-    dockEmpty: "Sobald alle Felder ausgefüllt sind, erscheinen hier die Dateinamen",
-    ready: "bereit",
-    finishSelectionFirst: "Zuerst Produkt, Marke, Marktplatz und mindestens eine Farbe wählen",
-    uploadDesign: "Design hochladen",
-    changeDesign: "Design ändern",
-    uploadDesignHint: "PNG mit transparentem Hintergrund empfohlen",
-    dragHint: "Design per Ziehen positionieren, an der unteren rechten Ecke skalieren",
     printArea: "Druckbereich",
     opacity: "Deckkraft",
     download: "Herunterladen",
     downloadAll: "Alle herunterladen (ZIP)",
     zippingAll: "ZIP wird erstellt…",
-    zipError: "ZIP konnte nicht erstellt werden, versuche es einzeln herunterzuladen",
-    mockupMissing: "In R2 nicht gefunden",
-    r2NotConfigured: "R2-Verbindung ist noch nicht eingerichtet — Mockups können nicht automatisch geladen werden. Sobald die Worker-Adresse in R2_BASE_URL eingetragen ist, lädt jede gewählte Farbe automatisch ihr Mockup.",
+    zipError: "ZIP konnte nicht erstellt werden, einzeln herunterladen",
+    mockupMissing: "Bild konnte nicht geladen werden",
+    r2NotConfigured: "R2-Verbindung ist noch nicht eingerichtet — Worker-Adresse in R2_BASE_URL eintragen.",
     generateMockups: "Mockups erstellen",
-    results: "Ergebnisse",
     missingCount: "fehlende Mockups",
-    referencePlaceholder: "Vorschau — das echte Mockup erscheint hier, sobald R2 verbunden ist",
-    products: { tshirt: "T-Shirt", sweatshirt: "Sweatshirt", hoody: "Hoody" },
-    marketplaces: { amazon: "Amazon", etsy: "Etsy" },
   },
   en: {
     brand: "SeZaLab",
-    title: "Mockup Selection Slip",
-    subtitle: "Pick product, brand, marketplace and color — the filename builds itself",
-    step1: "Product Type",
-    step2: "Blank Brand",
-    step3: "Marketplace",
-    step4: "Color",
-    step5: "Design & Placement",
-    amazonWarning: "Amazon selected → only white-background mockups will be used",
-    chooseBrandFirst: "Select blank brand and product type first",
-    noColorsYet: "No mockups in R2 yet for this combination",
+    title: "Mockup Studio",
+    subtitle: "Pick a folder, tick your mockups, place the design — download",
+    stepFolder: "Mockup Folder",
+    stepMockups: "Mockups",
+    stepDesign: "Design & Placement",
+    results: "Results",
+    folderPlaceholder: "Choose a folder…",
+    rootFolder: "No folder (root)",
+    folderHint: "Every folder you create in R2 shows up here automatically — just upload new mockups",
+    folderEmpty: "No mockups in this folder yet",
+    noFoldersYet: "No mockups in R2 yet — create a folder and upload images into it",
+    selectMockupsHint: "Click the mockups you want the design on (multi-select)",
+    selectAll: "Select All",
+    clearSelection: "Clear",
+    selectedWord: "selected",
+    mockupsWord: "mockups",
+    chooseFolderFirst: "Choose a folder above first",
+    selectMockupFirst: "Select at least one mockup first",
     r2Loading: "Scanning R2 for mockups…",
-    r2ListError: "Couldn't fetch the R2 mockup list — showing all colors, some may not be available.",
-    chooseTemplate: "Choose a Template",
-    chooseTemplateHint: "Jump-start by browsing what's already in R2 (optional)",
-    templatesEmpty: "No mockups in R2 yet",
+    r2ListError: "Couldn't fetch the R2 mockup list — try reloading.",
+    dockLabel: "Selected Mockups",
+    dockEmpty: "Selected filenames will be listed here",
+    ready: "selected",
+    uploadDesign: "Upload design",
+    changeDesign: "Change design",
+    uploadDesignHint: "Transparent-background PNG recommended",
+    dragHint: "Drag to position the design, resize from the corners",
     editingLabel: "Editing mockup",
     placementSaving: "Saving position…",
     placementSaved: "Position saved — this mockup will always open here from now on",
     placementSaveError: "Couldn't save position, only applies to this session",
-    dockLabel: "Mockup to look up",
-    dockEmpty: "Once every field is filled, filenames appear here",
-    ready: "ready",
-    finishSelectionFirst: "Pick product, brand, marketplace and at least one color first",
-    uploadDesign: "Upload design",
-    changeDesign: "Change design",
-    uploadDesignHint: "Transparent-background PNG recommended",
-    dragHint: "Drag to position the design, resize from the bottom-right corner",
     printArea: "Print Area",
     opacity: "Opacity",
     download: "Download",
     downloadAll: "Download All (ZIP)",
     zippingAll: "Zipping…",
     zipError: "Couldn't build the ZIP, try downloading individually",
-    mockupMissing: "Not found in R2",
-    r2NotConfigured: "R2 isn't connected yet — mockups can't load automatically. Once the Worker address is set in R2_BASE_URL, every color you pick will fetch its mockup on its own.",
+    mockupMissing: "Image failed to load",
+    r2NotConfigured: "R2 isn't connected yet — set the Worker address in R2_BASE_URL.",
     generateMockups: "Generate Mockups",
-    results: "Results",
     missingCount: "mockups missing",
-    referencePlaceholder: "Preview — the real mockup will appear here once R2 is connected",
-    products: { tshirt: "T-Shirt", sweatshirt: "Sweatshirt", hoody: "Hoody" },
-    marketplaces: { amazon: "Amazon", etsy: "Etsy" },
   },
 };
-
-// ---- Referans veri ----
-const PRODUCT_IDS = ["tshirt", "sweatshirt", "hoody"];
-
-// R2 dosya adlarında kullanılan sabit ürün etiketleri (arayüz dilinden bağımsız)
-const PRODUCT_FILE_LABELS = { tshirt: "T-Shirt", sweatshirt: "Sweatshirt", hoody: "Hoody" };
-
-const BRANDS = [
-  { id: "cc1717", label: "Comfort Colors", code: "1717" },
-  { id: "gildan64000", label: "Gildan 64000", code: "64000" },
-];
-
-const MARKETPLACE_IDS = ["amazon", "etsy"];
-
-const COLOR_CATALOG = {
-  cc1717__tshirt: [
-    { name: "Bay", hex: "#a8b79c" }, { name: "Berry", hex: "#6b4459" },
-    { name: "Black", hex: "#1a1a1a" }, { name: "Blossom", hex: "#f0c4cb" },
-    { name: "Blue Jean", hex: "#6e7f9e" }, { name: "Blue Spruce", hex: "#2f5c52" },
-    { name: "Brick", hex: "#6b2530" }, { name: "Bright Salmon", hex: "#f0603d" },
-    { name: "Burnt Orange", hex: "#e5721e" }, { name: "Butter", hex: "#f5d77a" },
-    { name: "Chalky Mint", hex: "#7fd6be" }, { name: "Chambray", hex: "#b9cdd1" },
-    { name: "Chili", hex: "#7a2536" }, { name: "China Blue", hex: "#3a4a82" },
-    { name: "Crimson", hex: "#7a2436" }, { name: "Crunchberry", hex: "#c13a6b" },
-    { name: "Emerald", hex: "#2e7f72" }, { name: "Espresso", hex: "#5c4033" },
-    { name: "Flo Blue", hex: "#5566b0" }, { name: "Granite", hex: "#9c9c9c" },
-    { name: "Graphite", hex: "#2b2b30" }, { name: "Gray", hex: "#6e6e6e" },
-    { name: "Hemp", hex: "#52562e" }, { name: "Ice Blue", hex: "#4a7791" },
-    { name: "Island Green", hex: "#00a67a" }, { name: "Island Reef", hex: "#8fd9b8" },
-    { name: "Ivory", hex: "#ede3d0" }, { name: "Lagoon", hex: "#1b8299" },
-    { name: "Light Green", hex: "#4e7a5d" }, { name: "Melon", hex: "#ef7d28" },
-    { name: "Midnight", hex: "#17233f" }, { name: "Moss", hex: "#5e6e45" },
-    { name: "Mustard", hex: "#dea738" }, { name: "Navy", hex: "#131c33" },
-    { name: "Neon Pink", hex: "#f13b79" }, { name: "Neon Red Orange", hex: "#f2481d" },
-    { name: "Orchid", hex: "#d7c8dc" }, { name: "Peachy", hex: "#f0be9c" },
-    { name: "Pepper", hex: "#38393a" }, { name: "Red", hex: "#c41e32" },
-    { name: "Royal Caribe", hex: "#14588c" }, { name: "Sage", hex: "#4c5342" },
-    { name: "Sandstone", hex: "#b3a78e" }, { name: "Sapphire", hex: "#0c7cb4" },
-    { name: "Seafoam", hex: "#2e9e7e" }, { name: "Terracotta", hex: "#e58a6e" },
-    { name: "Violet", hex: "#8983c0" }, { name: "Washed Denim", hex: "#7089aa" },
-    { name: "Watermelon", hex: "#c22b48" }, { name: "White", hex: "#fafaf7" },
-    { name: "Wine", hex: "#6e4a5a" }, { name: "Yam", hex: "#c1651f" },
-  ],
-  gildan64000__tshirt: [
-    { name: "Antique", hex: "#c7c7c7" }, { name: "Black", hex: "#1a1a1a" },
-    { name: "Cardinal Red", hex: "#9e1b32" }, { name: "Carolina Blue", hex: "#7ba7d9" },
-    { name: "Charcoal", hex: "#4a4a4a" }, { name: "Dark Chocolate", hex: "#3b2a20" },
-    { name: "Dark Heather", hex: "#5a5a60" }, { name: "Forest", hex: "#17472a" },
-    { name: "Gold", hex: "#f2b705" }, { name: "Heather Navy", hex: "#454b5e" },
-    { name: "Kelly Green", hex: "#00805e" }, { name: "Light Blue", hex: "#a8ccee" },
-    { name: "Light Pink", hex: "#f3c4ce" }, { name: "Maroon", hex: "#6c1f35" },
-    { name: "Military Green", hex: "#5d5d3f" }, { name: "Natural", hex: "#e8dfc8" },
-    { name: "Navy", hex: "#1b1f30" }, { name: "Orange", hex: "#f0602e" },
-    { name: "Purple", hex: "#4b2e83" }, { name: "Red", hex: "#c8102e" },
-    { name: "Royal", hex: "#1a56c4" }, { name: "Sand", hex: "#c6ad8b" },
-    { name: "Sapphire", hex: "#0e8ab5" }, { name: "Sport Gray", hex: "#a0a0a0" },
-    { name: "White", hex: "#fafaf7" },
-  ],
-};
-
-// Seçilen marka/ürün/pazar yeri/renklerle eşleşen GERÇEK R2 dosyalarını döndürür.
-// Dosya adı asla tahmin edilmez — sadece /list'in döndürdüğü gerçek anahtarlar kullanılır,
-// bu yüzden aynı renk için birden fazla mockup varsa hepsi üretilir.
-function entriesFromR2({ r2Entries, brand, product, marketplace, selectedColors }) {
-  if (!brand || !product || !marketplace || !selectedColors.length) return [];
-  const matches = r2Entries.filter(
-    (e) => e.brandId === brand && e.productId === product && e.marketplace === marketplace && selectedColors.includes(e.color)
-  );
-  const seen = new Map();
-  return matches.map((e) => {
-    const totalForColor = matches.filter((m) => m.color === e.color).length;
-    const n = (seen.get(e.color) || 0) + 1;
-    seen.set(e.color, n);
-    return { ...e, color: e.color, label: totalForColor > 1 ? `${e.color} #${n}` : e.color };
-  });
-}
-
-function isLight(hex) {
-  const c = hex.replace("#", "");
-  const r = parseInt(c.substring(0, 2), 16);
-  const g = parseInt(c.substring(2, 4), 16);
-  const b = parseInt(c.substring(4, 6), 16);
-  return (r * 299 + g * 587 + b * 114) / 1000 > 150;
-}
 
 function readFileAsDataURL(file) {
   return new Promise((resolve, reject) => {
@@ -295,23 +218,22 @@ function readFileAsDataURL(file) {
 export default function MockupSelectionScreen() {
   const [lang, setLang] = useState("en");
   const [langOpen, setLangOpen] = useState(false);
-  const [product, setProduct] = useState(null);
-  const [brand, setBrand] = useState(null);
-  const [marketplace, setMarketplace] = useState(null);
-  const [selectedColors, setSelectedColors] = useState([]);
   const [sheetOpen, setSheetOpen] = useState(false);
+
+  // Klasör-bazlı akış: R2'deki klasörler set'tir, içindeki her görsel bir mockup'tır.
+  const [selectedFolder, setSelectedFolder] = useState(null);
+  const [folderOpen, setFolderOpen] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState([]);
 
   const [designImg, setDesignImg] = useState(null);
   // Gerçek fotoğraflar birbirinden farklı kadrajlanmış olabilir; bu yüzden yerleşim tek bir
   // global değer değil, düzenlenmekte olan mockup dosyasının anahtarına göre ayrı ayrı tutulur.
-  // Kalibre edilen koordinatlar R2 worker'ında kalıcı olarak saklanır (ilk açılışta okunur,
-  // her değişiklikte birkaç saniye sonra otomatik geri yazılır) — böylece bir mockup fotoğrafı
-  // bir kere ayarlandıktan sonra herkes ve her tasarım için otomatik doğru yerde çıkar.
+  // Kalibre edilen koordinatlar R2 worker'ında kalıcı olarak saklanır.
   const [placements, setPlacements] = useState({});
   const [activeEntryKey, setActiveEntryKey] = useState(null);
   const [placementsSaveStatus, setPlacementsSaveStatus] = useState("idle"); // idle | saving | saved | error
   const placementsLoadedRef = useRef(false);
-  const [hoveredColor, setHoveredColor] = useState(null);
+  const skipNextSaveRef = useRef(false);
   const [generated, setGenerated] = useState(false);
   const [zipStatus, setZipStatus] = useState("idle"); // idle | zipping | error
 
@@ -356,7 +278,13 @@ export default function MockupSelectionScreen() {
       .then((res) => (res.ok ? res.json() : {}))
       .then((data) => {
         if (cancelled) return;
-        setPlacements(data && typeof data === "object" ? data : {});
+        if (data && typeof data === "object") {
+          // Eski sürümlerin bıraktığı "__colors__" gibi ayrılmış anahtarları yok say
+          const clean = Object.fromEntries(Object.entries(data).filter(([k]) => !k.startsWith("__")));
+          // Yüklemenin tetiklediği state değişimi geri-kaydetme döngüsüne girmesin
+          skipNextSaveRef.current = true;
+          setPlacements(clean);
+        }
       })
       .catch(() => {
         // Okuma başarısız olursa boş haritayla devam edilir — sürükleme yine çalışır,
@@ -373,6 +301,10 @@ export default function MockupSelectionScreen() {
   // Kullanıcı bir mockup'ı sürükleyip bıraktıkça, kısa bir bekleme sonrası otomatik kaydet
   useEffect(() => {
     if (!R2_PLACEMENTS_URL || !placementsLoadedRef.current) return;
+    if (skipNextSaveRef.current) {
+      skipNextSaveRef.current = false;
+      return;
+    }
     setPlacementsSaveStatus("saving");
     const timeout = setTimeout(() => {
       fetch(R2_PLACEMENTS_URL, {
@@ -389,84 +321,74 @@ export default function MockupSelectionScreen() {
     return () => clearTimeout(timeout);
   }, [placements]);
 
-  const r2Entries = useMemo(() => r2Keys.map(parseMockupKey).filter(Boolean), [r2Keys]);
-
-  const colorKey = brand && product ? `${brand}__${product}` : null;
-  const colors = useMemo(() => (colorKey ? COLOR_CATALOG[colorKey] ?? [] : []), [colorKey]);
-
-  // R2'de gerçekten karşılığı olan renkler — statik katalog yerine bunlar seçilebilir
-  const availableColorNames = useMemo(() => {
-    if (!brand || !product || !marketplace) return new Set();
-    return new Set(
-      r2Entries
-        .filter((e) => e.brandId === brand && e.productId === product && e.marketplace === marketplace)
-        .map((e) => e.color)
-    );
-  }, [r2Entries, brand, product, marketplace]);
-
-  const selectableColors = r2Status === "error" ? colors : colors.filter((c) => availableColorNames.has(c.name));
-
-  // R2'deki her gerçek dosya kendi göz atılabilir şablon kartı olur — gruplanmaz,
-  // böylece aynı marka+ürün altında birden fazla renk/fotoğraf varsa hepsi ayrı ayrı görünür.
-  const templates = useMemo(() => {
-    return r2Entries.map((e) => {
-      const paletteKey = `${e.brandId}__${e.productId}`;
-      const hex = COLOR_CATALOG[paletteKey]?.find((c) => c.name === e.color)?.hex ?? "#d4d4d8";
-      return {
-        ...e,
-        hex,
-        thumbSrc: mockupSrcFor(e.key),
-        brandLabel: BRANDS.find((b) => b.id === e.brandId)?.label ?? e.brandId,
-        productLabel: t.products[e.productId] ?? e.productId,
-      };
+  // R2 anahtarlarını klasörlere ayır
+  const folders = useMemo(() => {
+    const map = new Map();
+    for (const key of r2Keys) {
+      const item = classifyKey(key);
+      if (!item) continue;
+      if (!map.has(item.folder)) map.set(item.folder, []);
+      map.get(item.folder).push(item);
+    }
+    // Her klasörün içi alfabetik; klasör listesi de alfabetik, kök ("") en sonda
+    const list = Array.from(map.entries()).map(([folder, items]) => ({
+      folder,
+      items: items.sort((a, b) => a.label.localeCompare(b.label)),
+      thumbSrc: mockupSrcFor(items[0].key),
+    }));
+    list.sort((a, b) => {
+      if (a.folder === "") return 1;
+      if (b.folder === "") return -1;
+      return a.folder.localeCompare(b.folder);
     });
-  }, [r2Entries, t]);
+    return list;
+  }, [r2Keys]);
 
-  function handleSelectTemplate(tpl) {
-    setBrand(tpl.brandId);
-    setProduct(tpl.productId);
-    setMarketplace(tpl.marketplace);
-    setSelectedColors([tpl.color]);
-    setActiveEntryKey(tpl.key);
-    setGenerated(false);
-  }
+  const currentFolder = folders.find((f) => f.folder === selectedFolder) ?? null;
 
-  function handleBrandChange(id) {
-    setBrand(id);
-    setSelectedColors([]);
-    setGenerated(false);
-  }
-  function handleProductChange(id) {
-    setProduct(id);
-    setSelectedColors([]);
-    setGenerated(false);
-  }
-  function handleMarketplaceChange(id) {
-    setMarketplace(id);
-    setSelectedColors([]);
-    setGenerated(false);
-  }
-  function toggleColor(name) {
-    setSelectedColors((prev) =>
-      prev.includes(name) ? prev.filter((c) => c !== name) : [...prev, name]
-    );
-    setGenerated(false);
+  // Tek klasör varsa otomatik seç — kullanıcıyı bir tık'tan kurtar
+  useEffect(() => {
+    if (selectedFolder === null && folders.length === 1) {
+      setSelectedFolder(folders[0].folder);
+    }
+  }, [folders, selectedFolder]);
+
+  function folderDisplayName(folder) {
+    return folder === "" ? t.rootFolder : folder;
   }
 
-  const entries = useMemo(
-    () => entriesFromR2({ r2Entries, brand, product, marketplace, selectedColors }),
-    [r2Entries, brand, product, marketplace, selectedColors]
-  );
+  function toggleKey(key) {
+    setSelectedKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+    setGenerated(false);
+  }
+  function selectAllInFolder() {
+    if (!currentFolder) return;
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      for (const item of currentFolder.items) next.add(item.key);
+      return Array.from(next);
+    });
+    setGenerated(false);
+  }
+  function clearSelection() {
+    setSelectedKeys([]);
+    setGenerated(false);
+  }
+
+  // Seçilen mockuplar (klasörler arası seçim korunur)
+  const entries = useMemo(() => {
+    const byKey = new Map();
+    for (const f of folders) for (const item of f.items) byKey.set(item.key, item);
+    return selectedKeys
+      .filter((k) => byKey.has(k))
+      .map((k) => ({ ...byKey.get(k), src: mockupSrcFor(k) }));
+  }, [selectedKeys, folders]);
+
   const dockKeys = entries.map((e) => e.key);
-  const isAmazon = marketplace === "amazon";
-
-  // entries zaten R2'de doğrulanmış gerçek dosyalar olduğundan src her zaman geçerlidir;
-  // filtre yalnızca güvenlik amaçlı (ör. üretim sırasında dosya R2'den silinmişse) tutulur.
-  const entriesWithSrc = entries.map((e) => ({ ...e, src: mockupSrcFor(e.key) }));
-  const matchedEntries = entriesWithSrc.filter((e) => e.src);
+  const matchedEntries = entries.filter((e) => e.src);
   const missingCount = entries.length - matchedEntries.length;
 
-  // Hangi mockup fotoğrafının şu an düzenlendiğini, seçili renkler değiştikçe geçerli tutar
+  // Hangi mockup fotoğrafının şu an düzenlendiğini, seçim değiştikçe geçerli tutar
   useEffect(() => {
     setActiveEntryKey((prev) => {
       if (entries.length === 0) return null;
@@ -475,21 +397,16 @@ export default function MockupSelectionScreen() {
     });
   }, [entries]);
 
-  const activeSrc = entriesWithSrc.find((e) => e.key === activeEntryKey)?.src ?? null;
+  const activeSrc = entries.find((e) => e.key === activeEntryKey)?.src ?? null;
 
   function getPlacement(key) {
     const k = key ?? "__default__";
-    return placements[k] ?? placements.__default__ ?? DEFAULT_PLACEMENT;
+    return placements[k] ?? DEFAULT_PLACEMENT;
   }
   function setPlacementFor(key, next) {
     const k = key ?? "__default__";
     setPlacements((prev) => ({ ...prev, [k]: next }));
   }
-
-  const lastSelectedHex = selectedColors.length
-    ? colors.find((c) => c.name === selectedColors[selectedColors.length - 1])?.hex
-    : null;
-  const previewHex = hoveredColor ?? lastSelectedHex ?? "#d4d4d8";
 
   async function handleDesignUpload(e) {
     const file = e.target.files?.[0];
@@ -508,11 +425,10 @@ export default function MockupSelectionScreen() {
       for (const e of matchedEntries) {
         const blob = await previewRefs.current.get(e.key)?.getBlob();
         if (!blob) continue;
-        // Aynı dosya adı iki kere eklenmesin (teorik olarak olmamalı ama güvenlik için)
-        let name = e.key;
+        let name = safeFileName(e.key);
         let n = 2;
         while (usedNames.has(name)) {
-          name = e.key.replace(/\.png$/i, `_${n}.png`);
+          name = safeFileName(e.key).replace(/(\.\w+)$/i, `_${n}$1`);
           n++;
         }
         usedNames.add(name);
@@ -594,92 +510,138 @@ export default function MockupSelectionScreen() {
 
       {/* İçerik */}
       <div className="relative z-10 max-w-3xl mx-auto px-3 sm:px-10 -mt-5">
-        <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-4">
-          <SectionCard accent={ACCENT.coral} label={t.step1}>
-            <div className="flex flex-wrap gap-2">
-              {PRODUCT_IDS.map((id) => (
-                <Chip key={id} active={product === id} accent={ACCENT.coral} onClick={() => handleProductChange(id)}>
-                  {t.products[id]}
-                </Chip>
-              ))}
-            </div>
-          </SectionCard>
-
-          <SectionCard accent={ACCENT.teal} label={t.step2}>
-            <div className="flex flex-wrap gap-2">
-              {BRANDS.map((b) => (
-                <Chip key={b.id} active={brand === b.id} accent={ACCENT.teal} onClick={() => handleBrandChange(b.id)}>
-                  {b.label}
-                  <span className="ml-1 opacity-60 font-mono2 text-[10px]">{b.code}</span>
-                </Chip>
-              ))}
-            </div>
-          </SectionCard>
-
-          <SectionCard accent={ACCENT.violet} label={t.step3}>
-            <div className="flex flex-wrap gap-2">
-              {MARKETPLACE_IDS.map((id) => (
-                <Chip key={id} active={marketplace === id} accent={ACCENT.violet} onClick={() => handleMarketplaceChange(id)}>
-                  {t.marketplaces[id]}
-                </Chip>
-              ))}
-            </div>
-            {isAmazon && (
-              <p className="text-xs font-body mt-2.5 rounded-lg px-2.5 py-1.5 inline-block" style={{ backgroundColor: "#FFF4EE", color: ACCENT.coral }}>
-                ⚠ {t.amazonWarning}
+        {/* Adım 1: Klasör seçimi */}
+        <div className="mb-4">
+          <SectionCard accent={ACCENT.yellow} label={t.stepFolder}>
+            {r2Status === "unconfigured" ? (
+              <p className="text-xs font-body rounded-lg px-3 py-2" style={{ backgroundColor: "#F3F0FF", color: ACCENT.violet }}>
+                {t.r2NotConfigured}
               </p>
+            ) : r2Status === "loading" ? (
+              <p className="text-sm font-body text-gray-400 italic">{t.r2Loading}</p>
+            ) : r2Status === "error" ? (
+              <p className="text-xs font-body rounded-lg px-2.5 py-1.5 inline-block" style={{ backgroundColor: "#FFF4EE", color: ACCENT.coral }}>
+                {t.r2ListError}
+              </p>
+            ) : folders.length === 0 ? (
+              <p className="text-sm font-body text-gray-400 italic">{t.noFoldersYet}</p>
+            ) : (
+              <div className="relative">
+                <button
+                  onClick={() => setFolderOpen((o) => !o)}
+                  className="w-full flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-left hover:border-gray-300 transition"
+                >
+                  <span className="flex items-center gap-2.5 min-w-0">
+                    <Folder className="w-4 h-4 shrink-0" style={{ color: ACCENT.yellow }} />
+                    {currentFolder ? (
+                      <>
+                        <span className="font-display font-semibold text-sm text-gray-900 truncate">{folderDisplayName(currentFolder.folder)}</span>
+                        <span className="font-mono2 text-[10px] text-gray-400 shrink-0">{currentFolder.items.length} {t.mockupsWord}</span>
+                      </>
+                    ) : (
+                      <span className="font-body text-sm text-gray-400">{t.folderPlaceholder}</span>
+                    )}
+                  </span>
+                  <ChevronDown className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${folderOpen ? "rotate-180" : ""}`} />
+                </button>
+
+                {folderOpen && (
+                  <>
+                    {/* Dışarı tıklayınca kapansın */}
+                    <div className="fixed inset-0 z-10" onClick={() => setFolderOpen(false)} />
+                    <div className="absolute left-0 right-0 mt-2 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden z-20 max-h-80 overflow-y-auto">
+                      {folders.map((f) => (
+                        <button
+                          key={f.folder || "__root__"}
+                          onClick={() => {
+                            setSelectedFolder(f.folder);
+                            setFolderOpen(false);
+                          }}
+                          className={`w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-gray-50 transition ${
+                            selectedFolder === f.folder ? "bg-gray-50" : ""
+                          }`}
+                        >
+                          <span className="w-10 h-10 rounded-lg bg-gray-100 overflow-hidden shrink-0 flex items-center justify-center">
+                            {f.thumbSrc ? (
+                              <img src={f.thumbSrc} alt="" loading="lazy" className="w-full h-full object-cover" />
+                            ) : (
+                              <ImageOff className="w-4 h-4 text-gray-300" />
+                            )}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="font-display font-semibold text-sm text-gray-900 block truncate">{folderDisplayName(f.folder)}</span>
+                            <span className="font-mono2 text-[10px] text-gray-400">{f.items.length} {t.mockupsWord}</span>
+                          </span>
+                          {selectedFolder === f.folder && <Check className="w-4 h-4 shrink-0" style={{ color: ACCENT.violet }} />}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                <p className="text-[11px] font-body text-gray-400 mt-2">{t.folderHint}</p>
+              </div>
             )}
           </SectionCard>
         </div>
 
-        {r2Status !== "unconfigured" && (
-          <div className="mb-4">
-            <SectionCard accent={ACCENT.yellow} label={t.chooseTemplate}>
-              <p className="text-xs font-body text-gray-400 mb-3">{t.chooseTemplateHint}</p>
-              {r2Status === "loading" ? (
-                <p className="text-sm font-body text-gray-400 italic">{t.r2Loading}</p>
-              ) : r2Status === "error" ? (
-                <p className="text-xs font-body rounded-lg px-2.5 py-1.5 inline-block" style={{ backgroundColor: "#FFF4EE", color: ACCENT.coral }}>
-                  {t.r2ListError}
-                </p>
-              ) : templates.length === 0 ? (
-                <p className="text-sm font-body text-gray-400 italic">{t.templatesEmpty}</p>
-              ) : (
-                <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
-                  {templates.map((tpl) => {
-                    const active =
-                      brand === tpl.brandId &&
-                      product === tpl.productId &&
-                      marketplace === tpl.marketplace &&
-                      selectedColors.includes(tpl.color);
-                    return (
-                      <TemplateCard
-                        key={tpl.key}
-                        tpl={tpl}
-                        active={active}
-                        onClick={() => handleSelectTemplate(tpl)}
-                      />
-                    );
-                  })}
-                </div>
-              )}
-            </SectionCard>
-          </div>
-        )}
-
-        {/* Adım 5: Tasarım & Yerleşim */}
+        {/* Adım 2: Mockup seçimi */}
         <div className="mb-4">
-          <SectionCard accent="#1a1a1a" label={t.step5}>
-            {!product || !brand || !marketplace ? (
-              <p className="text-sm font-body text-gray-400 italic">{t.finishSelectionFirst}</p>
+          <SectionCard accent={ACCENT.coral} label={t.stepMockups}>
+            {r2Status !== "ready" ? (
+              <p className="text-sm font-body text-gray-400 italic">{r2Status === "loading" ? t.r2Loading : t.chooseFolderFirst}</p>
+            ) : !currentFolder ? (
+              <p className="text-sm font-body text-gray-400 italic">{t.chooseFolderFirst}</p>
+            ) : currentFolder.items.length === 0 ? (
+              <p className="text-sm font-body text-gray-400 italic">{t.folderEmpty}</p>
+            ) : (
+              <div>
+                <div className="flex items-center justify-between flex-wrap gap-2 mb-2.5">
+                  <p className="text-xs font-body text-gray-400">{t.selectMockupsHint}</p>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {selectedKeys.length > 0 && (
+                      <span className="font-mono2 text-[10px] px-2 py-1 rounded-full" style={{ backgroundColor: "#F3F0FF", color: ACCENT.violet }}>
+                        {selectedKeys.length} {t.selectedWord}
+                      </span>
+                    )}
+                    <button
+                      onClick={selectAllInFolder}
+                      className="text-[11px] font-body font-semibold rounded-full px-2.5 py-1 border border-gray-200 text-gray-600 hover:border-gray-300 transition"
+                    >
+                      {t.selectAll}
+                    </button>
+                    {selectedKeys.length > 0 && (
+                      <button
+                        onClick={clearSelection}
+                        className="text-[11px] font-body font-semibold rounded-full px-2.5 py-1 border border-gray-200 text-gray-600 hover:border-gray-300 transition"
+                      >
+                        {t.clearSelection}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                  {currentFolder.items.map((item) => (
+                    <MockupTile
+                      key={item.key}
+                      item={item}
+                      selected={selectedKeys.includes(item.key)}
+                      onClick={() => toggleKey(item.key)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </SectionCard>
+        </div>
+
+        {/* Adım 3: Tasarım & Yerleşim */}
+        <div className="mb-4">
+          <SectionCard accent="#1a1a1a" label={t.stepDesign}>
+            {entries.length === 0 ? (
+              <p className="text-sm font-body text-gray-400 italic">{t.selectMockupFirst}</p>
             ) : (
               <div className="space-y-4">
-                {!R2_BASE_URL && (
-                  <p className="text-xs font-body rounded-lg px-3 py-2" style={{ backgroundColor: "#F3F0FF", color: ACCENT.violet }}>
-                    {t.r2NotConfigured}
-                  </p>
-                )}
-
                 <div>
                   <label className="flex items-center gap-3 cursor-pointer">
                     <div
@@ -704,11 +666,11 @@ export default function MockupSelectionScreen() {
 
                 {designImg && (
                   <div>
-                    {entriesWithSrc.length > 1 && (
+                    {entries.length > 1 && (
                       <div className="mb-2">
                         <p className="text-[10px] font-mono2 uppercase tracking-wide text-gray-400 mb-1">{t.editingLabel}</p>
                         <div className="flex flex-wrap gap-1.5">
-                          {entriesWithSrc.map((e) => (
+                          {entries.map((e) => (
                             <button
                               key={e.key}
                               onClick={() => setActiveEntryKey(e.key)}
@@ -728,7 +690,7 @@ export default function MockupSelectionScreen() {
                     <DesignPlacer
                       designSrc={designImg}
                       referenceSrc={activeSrc}
-                      tshirtColor={previewHex}
+                      tshirtColor="#d4d4d8"
                       placement={getPlacement(activeEntryKey)}
                       onChange={(next) => setPlacementFor(activeEntryKey, next)}
                       t={t}
@@ -756,50 +718,6 @@ export default function MockupSelectionScreen() {
                     </div>
                   </div>
                 )}
-
-                {/* Renk seçimi — önizlemenin hemen altında. Sadece R2'de gerçekten mockup'ı olan renkler seçilebilir. */}
-                <div className="pt-2 border-t border-gray-100">
-                  <p className="text-[11px] tracking-[0.15em] uppercase text-gray-400 font-mono2 mb-2.5">{t.step4}</p>
-                  {!brand || !product ? (
-                    <p className="text-sm font-body text-gray-400 italic">{t.chooseBrandFirst}</p>
-                  ) : r2Status === "loading" ? (
-                    <p className="text-sm font-body text-gray-400 italic">{t.r2Loading}</p>
-                  ) : selectableColors.length === 0 ? (
-                    <p className="text-sm font-body text-gray-400 italic">{t.noColorsYet}</p>
-                  ) : (
-                    <>
-                      {r2Status === "error" && (
-                        <p className="text-xs font-body rounded-lg px-2.5 py-1.5 mb-2 inline-block" style={{ backgroundColor: "#FFF4EE", color: ACCENT.coral }}>
-                          {t.r2ListError}
-                        </p>
-                      )}
-                      <div className="flex flex-wrap gap-1.5">
-                        {selectableColors.map((c) => {
-                          const active = selectedColors.includes(c.name);
-                          return (
-                            <button
-                              key={c.name}
-                              onClick={() => toggleColor(c.name)}
-                              onMouseEnter={() => setHoveredColor(c.hex)}
-                              onMouseLeave={() => setHoveredColor(null)}
-                              className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1.5 rounded-full border text-xs font-body font-medium transition text-left"
-                              style={{
-                                borderColor: active ? "#1a1a1a" : "#e5e7eb",
-                                backgroundColor: active ? "#1a1a1a" : "white",
-                                color: active ? "white" : "#374151",
-                              }}
-                            >
-                              <span className="w-4 h-4 rounded-full border border-black/10 flex items-center justify-center shrink-0" style={{ backgroundColor: c.hex }}>
-                                {active && <Check className="w-2.5 h-2.5" color={isLight(c.hex) ? "#000000" : "#ffffff"} strokeWidth={3.5} />}
-                              </span>
-                              <span>{c.name}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </>
-                  )}
-                </div>
 
                 {dockKeys.length > 0 && (
                   <div className="bg-gray-50 rounded-xl p-3">
@@ -849,7 +767,7 @@ export default function MockupSelectionScreen() {
                 </p>
               )}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {entriesWithSrc.map((e) => (
+                {entries.map((e) => (
                   <MockupPreview
                     key={e.key}
                     ref={(el) => {
@@ -931,37 +849,25 @@ function SectionCard({ accent, label, children }) {
   );
 }
 
-function Chip({ active, accent, onClick, children }) {
-  return (
-    <button
-      onClick={onClick}
-      className="px-2 py-1 sm:px-3 sm:py-1.5 rounded-full text-xs sm:text-sm font-body font-medium border transition whitespace-nowrap"
-      style={{
-        borderColor: active ? accent : "#e5e7eb",
-        backgroundColor: active ? accent : "white",
-        color: active ? "white" : "#374151",
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-// R2'de gerçekten var olan tek bir mockup dosyasını önizleyip tek tıkla seçtiren küçük kart
-function TemplateCard({ tpl, active, onClick }) {
+// Klasör içindeki tek bir mockup görseli — tıklayınca seçime girer/çıkar
+function MockupTile({ item, selected, onClick }) {
   const [imgFailed, setImgFailed] = useState(false);
 
   return (
     <button
       onClick={onClick}
-      className="shrink-0 w-20 text-left rounded-lg border overflow-hidden transition"
-      style={{ borderColor: active ? ACCENT.violet : "#e5e7eb", boxShadow: active ? `0 0 0 2px ${ACCENT.violet}` : "none" }}
+      className="relative text-left rounded-lg border overflow-hidden transition group"
+      style={{
+        borderColor: selected ? ACCENT.violet : "#e5e7eb",
+        boxShadow: selected ? `0 0 0 2px ${ACCENT.violet}` : "none",
+      }}
     >
-      <div className="w-20 h-20 bg-gray-100 flex items-center justify-center overflow-hidden">
-        {tpl.thumbSrc && !imgFailed ? (
+      <div className="aspect-square bg-gray-100 flex items-center justify-center overflow-hidden">
+        {!imgFailed ? (
           <img
-            src={tpl.thumbSrc}
-            alt={tpl.color}
+            src={mockupSrcFor(item.key)}
+            alt={item.label}
+            loading="lazy"
             className="w-full h-full object-cover"
             onError={() => setImgFailed(true)}
           />
@@ -969,12 +875,16 @@ function TemplateCard({ tpl, active, onClick }) {
           <ImageOff className="w-4 h-4 text-gray-300" />
         )}
       </div>
-      <div className="p-1.5">
-        <div className="flex items-center gap-1">
-          <span className="w-2.5 h-2.5 rounded-full border border-black/10 shrink-0" style={{ backgroundColor: tpl.hex }} />
-          <p className="font-display font-semibold text-[11px] text-gray-900 truncate">{tpl.color}</p>
-        </div>
-        <p className="font-body text-[9px] text-gray-400 truncate">{tpl.brandLabel}</p>
+      {selected && (
+        <span
+          className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center"
+          style={{ backgroundColor: ACCENT.violet }}
+        >
+          <Check className="w-3 h-3 text-white" strokeWidth={3} />
+        </span>
+      )}
+      <div className="px-1.5 py-1">
+        <p className="font-body text-[10px] text-gray-700 font-medium truncate">{item.label}</p>
       </div>
     </button>
   );
@@ -1000,7 +910,7 @@ function SliderControl({ label, value, onChange, accent, min = 0, max = 100 }) {
   );
 }
 
-// Basit düz-vektör tişört silüeti — seçilen/hover edilen renge göre boyanır
+// Basit düz-vektör tişört silüeti — mockup görseli yüklenemezse yedek olarak gösterilir
 function TShirtSilhouette({ color }) {
   return (
     <svg viewBox="0 0 300 250" className="absolute inset-0 w-full h-full pointer-events-none" preserveAspectRatio="xMidYMid meet">
@@ -1243,7 +1153,7 @@ const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockup
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = fileKey;
+      a.download = safeFileName(fileKey);
       a.click();
       URL.revokeObjectURL(url);
     }, "image/png");
