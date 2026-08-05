@@ -1018,7 +1018,7 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
         <TShirtSilhouette color={tshirtColor} />
       )}
 
-      {/* Print Area reference (hidden for visual cleanliness) — kept for coordinate system */}
+      {/* Print Area reference — visual guide for design placement */}
       <div
         className="absolute border border-dashed pointer-events-none"
         style={{
@@ -1026,8 +1026,7 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
           top: `${PRINT_AREA.top}%`,
           width: `${PRINT_AREA.width}%`,
           height: `${PRINT_AREA.height}%`,
-          borderColor: "rgba(0,0,0,0)",
-          display: "none",
+          borderColor: "rgba(0,0,0,0.35)",
         }}
       />
 
