@@ -40,19 +40,41 @@ function mockupSrcFor(key) {
 }
 
 // Dosya adını "{Brand-Slug}_{Renk}_{Ürün}[_White-BG].png" kalıbından geri çözer.
-function parseMockupKey(key) {
-  const parts = key.replace(/\.png$/i, "").split("_");
+// Marka ve ürün SABİT bir listeden doğrulanmaz — R2'ye yeni bir marka/ürün yüklendiğinde
+// kod değişikliği olmadan otomatik tanınır. Bilinen markalar (BRANDS) sadece daha güzel
+// etiket/kod göstermek ve statik renk kataloğundan hex bulmak için kullanılır.
+// Dönüş: { ok: true, entry } | { ok: false, reason } | { skip: true } (sistem dosyaları)
+function classifyMockupKey(key) {
+  // _placements.json gibi sistem dosyalarını ve görsel olmayanları sessizce atla
+  if (key.startsWith("_")) return { skip: true };
+  if (!/\.(png|webp|jpe?g)$/i.test(key)) return { skip: true };
+
+  const parts = key.replace(/\.(png|webp|jpe?g)$/i, "").split("_");
   let isAmazon = false;
   if (parts[parts.length - 1] === "White-BG") {
     isAmazon = true;
     parts.pop();
   }
-  if (parts.length !== 3) return null;
+  if (parts.length !== 3 || parts.some((p) => !p.trim())) {
+    return { ok: false, reason: "pattern" };
+  }
   const [brandSlug, color, productLabel] = parts;
-  const brand = BRANDS.find((b) => b.label.replace(/\s+/g, "-") === brandSlug);
-  const productId = Object.keys(PRODUCT_FILE_LABELS).find((id) => PRODUCT_FILE_LABELS[id] === productLabel);
-  if (!brand || !productId) return null;
-  return { key, brandId: brand.id, color, productId, marketplace: isAmazon ? "amazon" : "etsy" };
+  const knownBrand = BRANDS.find((b) => b.label.replace(/\s+/g, "-") === brandSlug);
+  const knownProductId = Object.keys(PRODUCT_FILE_LABELS).find((id) => PRODUCT_FILE_LABELS[id] === productLabel);
+  return {
+    ok: true,
+    entry: {
+      key,
+      brandId: knownBrand ? knownBrand.id : brandSlug,
+      brandSlug,
+      brandLabel: knownBrand ? knownBrand.label : brandSlug.replace(/-/g, " "),
+      brandCode: knownBrand?.code ?? null,
+      color,
+      productId: knownProductId ?? productLabel,
+      productLabel,
+      marketplace: isAmazon ? "amazon" : "etsy",
+    },
+  };
 }
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -83,6 +105,14 @@ const T = {
     chooseTemplateHint: "R2'deki hazır mockuplardan göz atarak hızlıca başla (opsiyonel)",
     templatesEmpty: "R2'de henüz hiç mockup yok",
     editingLabel: "Düzenlenen mockup",
+    searchPlaceholder: "Ara: renk, marka, ürün, pazar yeri…",
+    noSearchResults: "Aramayla eşleşen mockup yok",
+    mockupsWord: "mockup",
+    unrecognizedFiles: "dosya tanınamadı",
+    unrecognizedHint: "Beklenen ad kalıbı: Marka-Slug_Renk_Ürün.png (Amazon için sonuna _White-BG). Örn: Comfort-Colors_Pepper_T-Shirt.png",
+    colorUndefined: "renk tanımsız",
+    colorUndefinedHint: "Gri noktaya tıklayıp bu rengin tonunu bir kere seç — kalıcı kaydedilir",
+    colorSaved: "Renk kaydedildi",
     placementSaving: "Konum kaydediliyor…",
     placementSaved: "Konum kaydedildi — bu mockup bir daha hep burada çıkacak",
     placementSaveError: "Konum kaydedilemedi, sadece bu oturumda geçerli olacak",
@@ -127,6 +157,14 @@ const T = {
     chooseTemplateHint: "Schnellstart durch Stöbern in vorhandenen R2-Mockups (optional)",
     templatesEmpty: "Noch keine Mockups in R2",
     editingLabel: "Bearbeitetes Mockup",
+    searchPlaceholder: "Suche: Farbe, Marke, Produkt, Marktplatz…",
+    noSearchResults: "Keine Mockups passen zur Suche",
+    mockupsWord: "Mockups",
+    unrecognizedFiles: "Dateien nicht erkannt",
+    unrecognizedHint: "Erwartetes Namensmuster: Marken-Slug_Farbe_Produkt.png (für Amazon _White-BG anhängen). Z. B.: Comfort-Colors_Pepper_T-Shirt.png",
+    colorUndefined: "Farbe nicht definiert",
+    colorUndefinedHint: "Auf den grauen Punkt klicken und den Farbton einmal wählen — wird dauerhaft gespeichert",
+    colorSaved: "Farbe gespeichert",
     placementSaving: "Position wird gespeichert…",
     placementSaved: "Position gespeichert — dieses Mockup erscheint ab jetzt immer hier",
     placementSaveError: "Position konnte nicht gespeichert werden, gilt nur für diese Sitzung",
@@ -171,6 +209,14 @@ const T = {
     chooseTemplateHint: "Jump-start by browsing what's already in R2 (optional)",
     templatesEmpty: "No mockups in R2 yet",
     editingLabel: "Editing mockup",
+    searchPlaceholder: "Search: color, brand, product, marketplace…",
+    noSearchResults: "No mockups match your search",
+    mockupsWord: "mockups",
+    unrecognizedFiles: "files not recognized",
+    unrecognizedHint: "Expected name pattern: Brand-Slug_Color_Product.png (append _White-BG for Amazon). E.g.: Comfort-Colors_Pepper_T-Shirt.png",
+    colorUndefined: "color not defined",
+    colorUndefinedHint: "Click the gray dot and pick this color's shade once — it's saved permanently",
+    colorSaved: "Color saved",
     placementSaving: "Saving position…",
     placementSaved: "Position saved — this mockup will always open here from now on",
     placementSaveError: "Couldn't save position, only applies to this session",
@@ -308,12 +354,22 @@ export default function MockupSelectionScreen() {
   // her değişiklikte birkaç saniye sonra otomatik geri yazılır) — böylece bir mockup fotoğrafı
   // bir kere ayarlandıktan sonra herkes ve her tasarım için otomatik doğru yerde çıkar.
   const [placements, setPlacements] = useState({});
+  // Statik katalogda olmayan renkler için kullanıcı tarafından seçilen tonlar.
+  // Anahtar: "{brandSlug}__{renk}", değer: hex. Placements ile aynı R2 belgesinde
+  // ("__colors__" ayrılmış anahtarı altında) saklanır — worker değişikliği gerektirmez.
+  const [colorOverrides, setColorOverrides] = useState({});
   const [activeEntryKey, setActiveEntryKey] = useState(null);
   const [placementsSaveStatus, setPlacementsSaveStatus] = useState("idle"); // idle | saving | saved | error
   const placementsLoadedRef = useRef(false);
+  const skipNextSaveRef = useRef(false);
   const [hoveredColor, setHoveredColor] = useState(null);
   const [generated, setGenerated] = useState(false);
   const [zipStatus, setZipStatus] = useState("idle"); // idle | zipping | error
+
+  // Şablon tarayıcısı: arama + grup aç/kapa durumu
+  const [templateSearch, setTemplateSearch] = useState("");
+  const [openGroups, setOpenGroups] = useState(null); // null = henüz kullanıcı dokunmadı (ilk grup açık)
+  const [showUnrecognized, setShowUnrecognized] = useState(false);
 
   // R2 bucket'ındaki gerçek mockup dosyalarının canlı listesi
   const [r2Status, setR2Status] = useState(R2_LIST_URL ? "loading" : "unconfigured");
@@ -356,7 +412,14 @@ export default function MockupSelectionScreen() {
       .then((res) => (res.ok ? res.json() : {}))
       .then((data) => {
         if (cancelled) return;
-        setPlacements(data && typeof data === "object" ? data : {});
+        if (data && typeof data === "object") {
+          // Belge hem yerleşimleri hem ("__colors__" altında) renk tonlarını taşır
+          const { __colors__, ...rest } = data;
+          // Yüklemenin tetiklediği state değişimi geri-kaydetme döngüsüne girmesin
+          skipNextSaveRef.current = true;
+          setPlacements(rest);
+          if (__colors__ && typeof __colors__ === "object") setColorOverrides(__colors__);
+        }
       })
       .catch(() => {
         // Okuma başarısız olursa boş haritayla devam edilir — sürükleme yine çalışır,
@@ -370,15 +433,19 @@ export default function MockupSelectionScreen() {
     };
   }, []);
 
-  // Kullanıcı bir mockup'ı sürükleyip bıraktıkça, kısa bir bekleme sonrası otomatik kaydet
+  // Yerleşim veya renk tonu değiştikçe, kısa bir bekleme sonrası otomatik kaydet
   useEffect(() => {
     if (!R2_PLACEMENTS_URL || !placementsLoadedRef.current) return;
+    if (skipNextSaveRef.current) {
+      skipNextSaveRef.current = false;
+      return;
+    }
     setPlacementsSaveStatus("saving");
     const timeout = setTimeout(() => {
       fetch(R2_PLACEMENTS_URL, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(placements),
+        body: JSON.stringify({ ...placements, __colors__: colorOverrides }),
       })
         .then((res) => {
           if (!res.ok) throw new Error(`save failed: ${res.status}`);
@@ -387,40 +454,117 @@ export default function MockupSelectionScreen() {
         .catch(() => setPlacementsSaveStatus("error"));
     }, 900);
     return () => clearTimeout(timeout);
-  }, [placements]);
+  }, [placements, colorOverrides]);
 
-  const r2Entries = useMemo(() => r2Keys.map(parseMockupKey).filter(Boolean), [r2Keys]);
+  // R2 dosya adlarını çöz: tanınanlar kullanılabilir mockup olur,
+  // kalıba uymayanlar sebepleriyle birlikte uyarı panelinde listelenir.
+  const { r2Entries, unrecognizedKeys } = useMemo(() => {
+    const entries = [];
+    const bad = [];
+    for (const key of r2Keys) {
+      const c = classifyMockupKey(key);
+      if (c.skip) continue;
+      if (c.ok) entries.push(c.entry);
+      else bad.push(key);
+    }
+    return { r2Entries: entries, unrecognizedKeys: bad };
+  }, [r2Keys]);
 
-  const colorKey = brand && product ? `${brand}__${product}` : null;
-  const colors = useMemo(() => (colorKey ? COLOR_CATALOG[colorKey] ?? [] : []), [colorKey]);
+  // Bir rengin tonunu bul: önce statik katalog, sonra kullanıcı kayıtları, yoksa "tanımsız"
+  function resolveHex(brandId, brandSlug, productId, color) {
+    const catalogHex = COLOR_CATALOG[`${brandId}__${productId}`]?.find((c) => c.name === color)?.hex;
+    if (catalogHex) return { hex: catalogHex, known: true };
+    const override = colorOverrides[`${brandSlug}__${color}`];
+    if (override) return { hex: override, known: true };
+    return { hex: "#d4d4d8", known: false };
+  }
 
-  // R2'de gerçekten karşılığı olan renkler — statik katalog yerine bunlar seçilebilir
-  const availableColorNames = useMemo(() => {
-    if (!brand || !product || !marketplace) return new Set();
-    return new Set(
-      r2Entries
-        .filter((e) => e.brandId === brand && e.productId === product && e.marketplace === marketplace)
-        .map((e) => e.color)
-    );
-  }, [r2Entries, brand, product, marketplace]);
+  // Marka ve ürün listeleri R2'deki gerçek dosyalardan türetilir — yeni bir marka/ürün
+  // yüklendiğinde kod değişikliği olmadan burada otomatik belirir. R2 boş/ulaşılamazken
+  // statik listeler gösterilir ki uygulama işlevsiz kalmasın.
+  const dynamicBrands = useMemo(() => {
+    const map = new Map();
+    for (const e of r2Entries) {
+      if (!map.has(e.brandId)) map.set(e.brandId, { id: e.brandId, label: e.brandLabel, code: e.brandCode });
+    }
+    return map.size > 0 ? Array.from(map.values()) : BRANDS;
+  }, [r2Entries]);
 
-  const selectableColors = r2Status === "error" ? colors : colors.filter((c) => availableColorNames.has(c.name));
-
-  // R2'deki her gerçek dosya kendi göz atılabilir şablon kartı olur — gruplanmaz,
-  // böylece aynı marka+ürün altında birden fazla renk/fotoğraf varsa hepsi ayrı ayrı görünür.
-  const templates = useMemo(() => {
-    return r2Entries.map((e) => {
-      const paletteKey = `${e.brandId}__${e.productId}`;
-      const hex = COLOR_CATALOG[paletteKey]?.find((c) => c.name === e.color)?.hex ?? "#d4d4d8";
-      return {
-        ...e,
-        hex,
-        thumbSrc: mockupSrcFor(e.key),
-        brandLabel: BRANDS.find((b) => b.id === e.brandId)?.label ?? e.brandId,
-        productLabel: t.products[e.productId] ?? e.productId,
-      };
-    });
+  const dynamicProducts = useMemo(() => {
+    const map = new Map();
+    for (const e of r2Entries) {
+      if (!map.has(e.productId)) map.set(e.productId, { id: e.productId, label: t.products[e.productId] ?? e.productLabel });
+    }
+    return map.size > 0
+      ? Array.from(map.values())
+      : PRODUCT_IDS.map((id) => ({ id, label: t.products[id] }));
   }, [r2Entries, t]);
+
+  // Seçili marka+ürün+pazar yeri için R2'de gerçekten var olan renkler
+  const selectableColors = useMemo(() => {
+    if (!brand || !product || !marketplace) return [];
+    const seen = new Map();
+    for (const e of r2Entries) {
+      if (e.brandId !== brand || e.productId !== product || e.marketplace !== marketplace) continue;
+      if (!seen.has(e.color)) {
+        const { hex, known } = resolveHex(e.brandId, e.brandSlug, e.productId, e.color);
+        seen.set(e.color, { name: e.color, hex, known, brandSlug: e.brandSlug });
+      }
+    }
+    return Array.from(seen.values());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [r2Entries, brand, product, marketplace, colorOverrides]);
+
+  // Şablon tarayıcısı: her dosya bir kart; marka+ürün+pazar yeri bazında gruplanır,
+  // arama metni renk/marka/ürün/pazar yeri üzerinde filtreler.
+  const templateGroups = useMemo(() => {
+    const q = templateSearch.trim().toLowerCase();
+    const groups = new Map();
+    for (const e of r2Entries) {
+      const marketplaceLabel = t.marketplaces[e.marketplace] ?? e.marketplace;
+      const productLabel = t.products[e.productId] ?? e.productLabel;
+      const haystack = `${e.color} ${e.brandLabel} ${e.brandSlug} ${productLabel} ${e.productLabel} ${marketplaceLabel}`.toLowerCase();
+      if (q && !haystack.includes(q)) continue;
+      const gid = `${e.brandId}__${e.productId}__${e.marketplace}`;
+      if (!groups.has(gid)) {
+        groups.set(gid, {
+          id: gid,
+          brandId: e.brandId,
+          productId: e.productId,
+          marketplace: e.marketplace,
+          title: `${e.brandLabel} · ${productLabel} · ${marketplaceLabel}`,
+          items: [],
+        });
+      }
+      const { hex, known } = resolveHex(e.brandId, e.brandSlug, e.productId, e.color);
+      groups.get(gid).items.push({ ...e, hex, hexKnown: known, thumbSrc: mockupSrcFor(e.key) });
+    }
+    return Array.from(groups.values());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [r2Entries, templateSearch, colorOverrides, t]);
+
+  function isGroupOpen(gid, index) {
+    if (templateSearch.trim()) return true; // arama varken tüm eşleşen gruplar açık
+    if (openGroups === null) return index === 0; // ilk ziyarette sadece ilk grup açık
+    return openGroups.has(gid);
+  }
+  function toggleGroup(gid, index) {
+    setOpenGroups((prev) => {
+      const next = new Set(
+        prev ?? templateGroups.filter((g, i) => isGroupOpenInitial(i)).map((g) => g.id)
+      );
+      if (next.has(gid)) next.delete(gid);
+      else next.add(gid);
+      return next;
+    });
+    function isGroupOpenInitial(i) {
+      return i === 0;
+    }
+  }
+
+  function setColorOverride(brandSlug, color, hex) {
+    setColorOverrides((prev) => ({ ...prev, [`${brandSlug}__${color}`]: hex }));
+  }
 
   function handleSelectTemplate(tpl) {
     setBrand(tpl.brandId);
@@ -487,7 +631,7 @@ export default function MockupSelectionScreen() {
   }
 
   const lastSelectedHex = selectedColors.length
-    ? colors.find((c) => c.name === selectedColors[selectedColors.length - 1])?.hex
+    ? selectableColors.find((c) => c.name === selectedColors[selectedColors.length - 1])?.hex
     : null;
   const previewHex = hoveredColor ?? lastSelectedHex ?? "#d4d4d8";
 
@@ -597,9 +741,9 @@ export default function MockupSelectionScreen() {
         <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-4">
           <SectionCard accent={ACCENT.coral} label={t.step1}>
             <div className="flex flex-wrap gap-2">
-              {PRODUCT_IDS.map((id) => (
-                <Chip key={id} active={product === id} accent={ACCENT.coral} onClick={() => handleProductChange(id)}>
-                  {t.products[id]}
+              {dynamicProducts.map((p) => (
+                <Chip key={p.id} active={product === p.id} accent={ACCENT.coral} onClick={() => handleProductChange(p.id)}>
+                  {p.label}
                 </Chip>
               ))}
             </div>
@@ -607,10 +751,10 @@ export default function MockupSelectionScreen() {
 
           <SectionCard accent={ACCENT.teal} label={t.step2}>
             <div className="flex flex-wrap gap-2">
-              {BRANDS.map((b) => (
+              {dynamicBrands.map((b) => (
                 <Chip key={b.id} active={brand === b.id} accent={ACCENT.teal} onClick={() => handleBrandChange(b.id)}>
                   {b.label}
-                  <span className="ml-1 opacity-60 font-mono2 text-[10px]">{b.code}</span>
+                  {b.code && <span className="ml-1 opacity-60 font-mono2 text-[10px]">{b.code}</span>}
                 </Chip>
               ))}
             </div>
@@ -642,25 +786,82 @@ export default function MockupSelectionScreen() {
                 <p className="text-xs font-body rounded-lg px-2.5 py-1.5 inline-block" style={{ backgroundColor: "#FFF4EE", color: ACCENT.coral }}>
                   {t.r2ListError}
                 </p>
-              ) : templates.length === 0 ? (
+              ) : r2Entries.length === 0 && unrecognizedKeys.length === 0 ? (
                 <p className="text-sm font-body text-gray-400 italic">{t.templatesEmpty}</p>
               ) : (
-                <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
-                  {templates.map((tpl) => {
-                    const active =
-                      brand === tpl.brandId &&
-                      product === tpl.productId &&
-                      marketplace === tpl.marketplace &&
-                      selectedColors.includes(tpl.color);
-                    return (
-                      <TemplateCard
-                        key={tpl.key}
-                        tpl={tpl}
-                        active={active}
-                        onClick={() => handleSelectTemplate(tpl)}
-                      />
-                    );
-                  })}
+                <div className="space-y-2">
+                  <input
+                    type="search"
+                    value={templateSearch}
+                    onChange={(e) => setTemplateSearch(e.target.value)}
+                    placeholder={t.searchPlaceholder}
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-body outline-none focus:border-gray-400 bg-white"
+                  />
+
+                  {templateGroups.length === 0 ? (
+                    <p className="text-sm font-body text-gray-400 italic">{t.noSearchResults}</p>
+                  ) : (
+                    templateGroups.map((g, gi) => {
+                      const open = isGroupOpen(g.id, gi);
+                      return (
+                        <div key={g.id} className="border border-gray-100 rounded-xl overflow-hidden">
+                          <button
+                            onClick={() => toggleGroup(g.id, gi)}
+                            className="w-full flex items-center justify-between px-3 py-2.5 bg-gray-50 hover:bg-gray-100 transition text-left"
+                          >
+                            <span className="font-display font-semibold text-xs text-gray-800">{g.title}</span>
+                            <span className="flex items-center gap-2 shrink-0">
+                              <span className="font-mono2 text-[10px] text-gray-400">{g.items.length} {t.mockupsWord}</span>
+                              <ChevronUp className={`w-3.5 h-3.5 text-gray-400 transition-transform ${open ? "" : "rotate-180"}`} />
+                            </span>
+                          </button>
+                          {open && (
+                            <div className="flex gap-2 overflow-x-auto p-2">
+                              {g.items.map((tpl) => {
+                                const active =
+                                  brand === tpl.brandId &&
+                                  product === tpl.productId &&
+                                  marketplace === tpl.marketplace &&
+                                  selectedColors.includes(tpl.color);
+                                return (
+                                  <TemplateCard
+                                    key={tpl.key}
+                                    tpl={tpl}
+                                    active={active}
+                                    onClick={() => handleSelectTemplate(tpl)}
+                                  />
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+
+                  {unrecognizedKeys.length > 0 && (
+                    <div className="rounded-xl px-3 py-2" style={{ backgroundColor: "#FFF4EE" }}>
+                      <button
+                        onClick={() => setShowUnrecognized((v) => !v)}
+                        className="w-full flex items-center justify-between text-left"
+                      >
+                        <span className="text-xs font-body font-medium" style={{ color: ACCENT.coral }}>
+                          ⚠ {unrecognizedKeys.length} {t.unrecognizedFiles}
+                        </span>
+                        <ChevronUp className={`w-3.5 h-3.5 transition-transform ${showUnrecognized ? "" : "rotate-180"}`} style={{ color: ACCENT.coral }} />
+                      </button>
+                      {showUnrecognized && (
+                        <div className="mt-2 space-y-1">
+                          <p className="text-[11px] font-body text-gray-500">{t.unrecognizedHint}</p>
+                          <ul className="space-y-1">
+                            {unrecognizedKeys.map((k) => (
+                              <li key={k} className="font-mono2 text-[11px] break-all bg-white rounded px-2 py-1 text-gray-600">{k}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </SectionCard>
@@ -773,27 +974,53 @@ export default function MockupSelectionScreen() {
                           {t.r2ListError}
                         </p>
                       )}
+                      {selectableColors.some((c) => !c.known) && (
+                        <p className="text-xs font-body rounded-lg px-2.5 py-1.5 mb-2 inline-block" style={{ backgroundColor: "#F3F0FF", color: ACCENT.violet }}>
+                          {t.colorUndefinedHint}
+                        </p>
+                      )}
                       <div className="flex flex-wrap gap-1.5">
                         {selectableColors.map((c) => {
                           const active = selectedColors.includes(c.name);
                           return (
-                            <button
-                              key={c.name}
-                              onClick={() => toggleColor(c.name)}
-                              onMouseEnter={() => setHoveredColor(c.hex)}
-                              onMouseLeave={() => setHoveredColor(null)}
-                              className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1.5 rounded-full border text-xs font-body font-medium transition text-left"
-                              style={{
-                                borderColor: active ? "#1a1a1a" : "#e5e7eb",
-                                backgroundColor: active ? "#1a1a1a" : "white",
-                                color: active ? "white" : "#374151",
-                              }}
-                            >
-                              <span className="w-4 h-4 rounded-full border border-black/10 flex items-center justify-center shrink-0" style={{ backgroundColor: c.hex }}>
-                                {active && <Check className="w-2.5 h-2.5" color={isLight(c.hex) ? "#000000" : "#ffffff"} strokeWidth={3.5} />}
-                              </span>
-                              <span>{c.name}</span>
-                            </button>
+                            <span key={c.name} className="inline-flex items-center">
+                              {/* İçinde renk seçici input barındırabilmek için button değil div — iç içe interaktif eleman kısıtına takılmasın */}
+                              <div
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => toggleColor(c.name)}
+                                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") toggleColor(c.name); }}
+                                onMouseEnter={() => setHoveredColor(c.hex)}
+                                onMouseLeave={() => setHoveredColor(null)}
+                                className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1.5 rounded-full border text-xs font-body font-medium transition text-left cursor-pointer select-none"
+                                style={{
+                                  borderColor: active ? "#1a1a1a" : "#e5e7eb",
+                                  backgroundColor: active ? "#1a1a1a" : "white",
+                                  color: active ? "white" : "#374151",
+                                }}
+                              >
+                                {c.known ? (
+                                  <span className="w-4 h-4 rounded-full border border-black/10 flex items-center justify-center shrink-0" style={{ backgroundColor: c.hex }}>
+                                    {active && <Check className="w-2.5 h-2.5" color={isLight(c.hex) ? "#000000" : "#ffffff"} strokeWidth={3.5} />}
+                                  </span>
+                                ) : (
+                                  /* Tanımsız renk: gri kesikli nokta aslında bir renk seçici — tıklayınca tarayıcının
+                                     renk paleti açılır, seçilen ton R2'ye kalıcı kaydedilir */
+                                  <label
+                                    className="w-4 h-4 rounded-full border-2 border-dashed border-gray-400 bg-gray-200 shrink-0 cursor-pointer relative overflow-hidden"
+                                    title={t.colorUndefined}
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <input
+                                      type="color"
+                                      className="absolute inset-0 opacity-0 cursor-pointer"
+                                      onChange={(e) => setColorOverride(c.brandSlug, c.name, e.target.value)}
+                                    />
+                                  </label>
+                                )}
+                                <span>{c.name}</span>
+                              </div>
+                            </span>
                           );
                         })}
                       </div>
@@ -962,6 +1189,7 @@ function TemplateCard({ tpl, active, onClick }) {
           <img
             src={tpl.thumbSrc}
             alt={tpl.color}
+            loading="lazy"
             className="w-full h-full object-cover"
             onError={() => setImgFailed(true)}
           />
@@ -971,7 +1199,10 @@ function TemplateCard({ tpl, active, onClick }) {
       </div>
       <div className="p-1.5">
         <div className="flex items-center gap-1">
-          <span className="w-2.5 h-2.5 rounded-full border border-black/10 shrink-0" style={{ backgroundColor: tpl.hex }} />
+          <span
+            className={`w-2.5 h-2.5 rounded-full shrink-0 ${tpl.hexKnown === false ? "border border-dashed border-gray-400" : "border border-black/10"}`}
+            style={{ backgroundColor: tpl.hex }}
+          />
           <p className="font-display font-semibold text-[11px] text-gray-900 truncate">{tpl.color}</p>
         </div>
         <p className="font-body text-[9px] text-gray-400 truncate">{tpl.brandLabel}</p>
