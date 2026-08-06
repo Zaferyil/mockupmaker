@@ -249,6 +249,9 @@ function MockupStudio() {
   const [placementStatus, setPlacementStatus] = useState("idle"); // idle | analyzing | ready
   const placementsLoadedRef = useRef(false);
   const saveTimerRef = useRef(null);
+  // Templates this tab changed. Only these are written back, so a record
+  // deleted remotely is not resurrected by a stale in-memory store.
+  const dirtyKeysRef = useRef(new Set());
   const [generated, setGenerated] = useState(false);
   const [zipStatus, setZipStatus] = useState("idle"); // idle | zipping | error
 
@@ -315,22 +318,57 @@ function MockupStudio() {
   // Debounced persistence, called explicitly whenever a lock changes rather
   // than by watching a state object. Locks live in a ref, so an effect on
   // state would miss solver-written locks entirely.
+  //
+  // Writes are a MERGE of the current remote file with only the templates this
+  // tab actually touched. Blindly PUTting the whole in-memory store meant a
+  // long-open tab resurrected records that had been deleted elsewhere — and
+  // silently clobbered calibration done in another tab. Tracking a dirty set
+  // makes a remote delete stick, and makes two tabs additive instead of
+  // last-writer-wins.
   function persistLocks() {
     if (!R2_PLACEMENTS_URL || !placementsLoadedRef.current) return;
+    if (dirtyKeysRef.current.size === 0) return;
     setPlacementsSaveStatus("saving");
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      fetch(R2_PLACEMENTS_URL, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(locksRef.current.toJSON()),
-      })
-        .then((res) => {
-          if (!res.ok) throw new Error(`save failed: ${res.status}`);
-          setPlacementsSaveStatus("saved");
-        })
-        .catch(() => setPlacementsSaveStatus("error"));
+    saveTimerRef.current = setTimeout(async () => {
+      const dirty = Array.from(dirtyKeysRef.current);
+      try {
+        // Re-read immediately before writing so we merge onto current truth.
+        let remote = {};
+        try {
+          const res = await fetch(R2_PLACEMENTS_URL);
+          if (res.ok) {
+            const data = await res.json();
+            if (data && typeof data === "object") remote = data;
+          }
+        } catch {
+          // Unreadable remote — fall through and write just our own changes.
+        }
+
+        const store = locksRef.current;
+        const merged = { ...remote };
+        for (const key of dirty) {
+          const lock = store.get(key);
+          if (lock) merged[key] = lock;
+        }
+
+        const res = await fetch(R2_PLACEMENTS_URL, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(merged),
+        });
+        if (!res.ok) throw new Error(`save failed: ${res.status}`);
+        dirtyKeysRef.current.clear();
+        setPlacementsSaveStatus("saved");
+      } catch {
+        setPlacementsSaveStatus("error");
+      }
     }, 900);
+  }
+
+  /** Mark a template as changed by this tab so persistLocks will write it. */
+  function markDirty(key) {
+    dirtyKeysRef.current.add(key);
   }
 
   // R2 anahtarlarını klasörlere ayır
@@ -434,7 +472,10 @@ function MockupStudio() {
             log: (msg) => console.log(msg),
           });
           if (cancelled) return;
-          if (result.report.tier === "solved") solvedAny = true;
+          if (result.report.tier === "solved") {
+            solvedAny = true;
+            markDirty(entry.key);
+          }
           setResolved((prev) => ({ ...prev, [entry.key]: result }));
         } catch (err) {
           console.error(`[placement] ${entry.key} failed:`, err.message);
@@ -473,6 +514,7 @@ function MockupStudio() {
 
     const height = deriveHeight(placement.width, current.artwork.visibleAspect, current.imageAspect);
     locksRef.current.setPinned(key, placement, height);
+    markDirty(key);
 
     setResolved((prev) => ({ ...prev, [key]: { ...prev[key], placement } }));
     persistLocks();
@@ -514,6 +556,7 @@ function MockupStudio() {
         };
         const height = deriveHeight(placement.width, target.artwork.visibleAspect, target.imageAspect);
         locksRef.current.setPinned(key, placement, height);
+        markDirty(key);
         next[key] = { ...target, placement };
       }
       return next;
