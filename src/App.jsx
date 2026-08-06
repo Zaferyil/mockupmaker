@@ -1187,8 +1187,12 @@ function SliderControl({ label, value, onChange, accent, min = 0, max = 100 }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <span className="text-[10px] font-mono2 uppercase tracking-wide text-gray-500">{label}</span>
-        <span className="text-[10px] font-mono2 text-gray-400">{value}%</span>
+        {/* JetBrains Mono is loaded at 400/500/600, so semibold renders as a
+            real weight rather than a synthesised one. */}
+        <span className="text-[10px] font-mono2 font-semibold uppercase tracking-wide text-gray-600">
+          {label}
+        </span>
+        <span className="text-[10px] font-mono2 font-semibold text-gray-500">{value}%</span>
       </div>
       <input
         type="range"
