@@ -18,6 +18,8 @@ import {
 import { LoginPage } from "./LoginPage";
 import { AdminPanel } from "./AdminPanel";
 import { getCurrentUser, logout, getUserR2Path } from "./auth";
+import * as tf from "@tensorflow/tfjs";
+import * as cocoSsd from "@tensorflow-models/coco-ssd";
 
 // ============================================================
 // Design tokens: coral / teal / violet / yellow
@@ -1042,6 +1044,79 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
   useEffect(() => {
     setRefFailed(false);
   }, [referenceSrc]);
+
+  // Auto-detect optimal placement from mockup image
+  useEffect(() => {
+    if (!referenceSrc || !designSrc) return;
+
+    const detectAndPlace = async () => {
+      try {
+        // Load image
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = async () => {
+          try {
+            // Load COCO-SSD model and detect
+            const model = await cocoSsd.load();
+            const predictions = await model.estimateObjects(img);
+
+            // Look for person/shirt (center of torso area)
+            let autoPlacement = null;
+
+            // Find person prediction
+            const person = predictions.find(p => p.class === "person");
+            if (person) {
+              // Use center area of person's torso for shirt placement
+              const bbox = person.bbox;
+              const [x, y, w, h] = bbox;
+
+              // Convert to percentage (image coordinates to placement %)
+              const imgW = img.width;
+              const imgH = img.height;
+
+              // Estimate shirt area (roughly 30-50% of person's torso)
+              const shirtTop = y + h * 0.2;
+              const shirtLeft = x + w * 0.15;
+              const shirtWidth = w * 0.7;
+              const shirtHeight = h * 0.5;
+
+              autoPlacement = {
+                left: (shirtLeft / imgW) * 100,
+                top: (shirtTop / imgH) * 100,
+                width: (shirtWidth / imgW) * 100,
+                height: (shirtHeight / imgH) * 100,
+                opacity: placement.opacity || 100
+              };
+            }
+
+            // Fallback to smart defaults if no person detected
+            if (!autoPlacement) {
+              autoPlacement = {
+                left: 10,
+                top: 25,
+                width: 80,
+                height: 50,
+                opacity: placement.opacity || 100
+              };
+            }
+
+            // Only apply if placement is still default (user hasn't customized)
+            const isDefault = JSON.stringify(placement) === JSON.stringify(DEFAULT_PLACEMENT);
+            if (isDefault && autoPlacement) {
+              onChange(autoPlacement);
+            }
+          } catch (err) {
+            console.log("Auto-detection skipped, using default placement");
+          }
+        };
+        img.src = referenceSrc;
+      } catch (err) {
+        console.log("Image analysis failed, using default placement");
+      }
+    };
+
+    detectAndPlace();
+  }, [referenceSrc, designSrc]);
 
   useEffect(() => {
     function onMove(e) {
