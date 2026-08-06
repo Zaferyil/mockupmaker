@@ -413,6 +413,16 @@ function MockupStudio() {
     setGenerated(false);
   }
 
+  async function handleDesignDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const file = e.dataTransfer?.files?.[0];
+    if (!file) return;
+    const dataUrl = await readFileAsDataURL(file);
+    setDesignImg(dataUrl);
+    setGenerated(false);
+  }
+
   async function handleDownloadAll() {
     if (zipStatus === "zipping") return;
     setZipStatus("zipping");
@@ -654,6 +664,19 @@ function MockupStudio() {
                     <div
                       className="w-full rounded-lg border-2 border-dashed flex flex-col items-center justify-center py-6 sm:py-8 transition hover:bg-gray-50"
                       style={{ borderColor: designImg ? ACCENT.teal : "#d1d5db", backgroundColor: designImg ? "rgba(0, 194, 168, 0.02)" : "transparent" }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.currentTarget.style.borderColor = ACCENT.violet;
+                        e.currentTarget.style.backgroundColor = "rgba(123, 97, 255, 0.05)";
+                      }}
+                      onDragLeave={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.currentTarget.style.borderColor = designImg ? ACCENT.teal : "#d1d5db";
+                        e.currentTarget.style.backgroundColor = designImg ? "rgba(0, 194, 168, 0.02)" : "transparent";
+                      }}
+                      onDrop={handleDesignDrop}
                     >
                       {designImg ? (
                         <div className="flex flex-col items-center">
