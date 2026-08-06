@@ -1046,7 +1046,7 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
   return (
     <div
       ref={containerRef}
-      className="relative w-full aspect-square rounded-xl overflow-hidden bg-gray-100 select-none"
+      className="relative w-full max-w-xs aspect-square rounded-lg overflow-hidden bg-gray-100 select-none"
       style={{ touchAction: "none" }}
     >
       {referenceSrc && !refFailed ? (
