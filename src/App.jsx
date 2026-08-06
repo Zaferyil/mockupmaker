@@ -1085,6 +1085,7 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
           const designWidth = designImg.width;
           const designHeight = designImg.height;
           const designAspectRatio = designWidth / designHeight;
+          console.log(`[Auto-Placement] Design loaded: ${designWidth}x${designHeight}, aspect ratio: ${designAspectRatio.toFixed(2)}`);
 
           // Analyze mockup using color + AI detection
           const mockupImg = new Image();
@@ -1093,11 +1094,14 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
             try {
               const mockupW = mockupImg.width;
               const mockupH = mockupImg.height;
+              console.log(`[Auto-Placement] Mockup loaded: ${mockupW}x${mockupH}, aspect ratio: ${(mockupW/mockupH).toFixed(2)}`);
 
               // Method 1: AI person detection for reference
+              console.log(`[Auto-Placement] Starting AI detection...`);
               const model = await cocoSsd.load();
               const predictions = await model.estimateObjects(mockupImg);
               const person = predictions.find(p => p.class === "person");
+              console.log(`[Auto-Placement] AI detection complete. Person found: ${!!person}`);
 
               let shirtBounds = null;
 
@@ -1105,85 +1109,98 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
                 // Method 2: Refine with color analysis on detected area
                 const bbox = person.bbox;
                 const [px, py, pw, ph] = bbox;
+                console.log(`[Auto-Placement] Person bbox: x=${px.toFixed(0)}, y=${py.toFixed(0)}, w=${pw.toFixed(0)}, h=${ph.toFixed(0)}`);
 
-                // Get canvas for advanced color analysis
-                const canvas = document.createElement('canvas');
-                canvas.width = mockupW;
-                canvas.height = mockupH;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(mockupImg, 0, 0);
+                try {
+                  // Get canvas for advanced color analysis
+                  const canvas = document.createElement('canvas');
+                  canvas.width = mockupW;
+                  canvas.height = mockupH;
+                  const ctx = canvas.getContext('2d');
+                  ctx.drawImage(mockupImg, 0, 0);
 
-                // Analyze central torso area for shirt color
-                const torsoTop = py + ph * 0.15;
-                const torsoLeft = px + pw * 0.25;
-                const torsoRight = px + pw * 0.75;
-                const torsoBottom = py + ph * 0.65;
+                  // Analyze central torso area for shirt color
+                  const torsoTop = py + ph * 0.15;
+                  const torsoLeft = px + pw * 0.25;
+                  const torsoRight = px + pw * 0.75;
+                  const torsoBottom = py + ph * 0.65;
 
-                const imageData = ctx.getImageData(
-                  torsoLeft, torsoTop,
-                  torsoRight - torsoLeft,
-                  torsoBottom - torsoTop
-                );
-                const data = imageData.data;
+                  const imageData = ctx.getImageData(
+                    torsoLeft, torsoTop,
+                    torsoRight - torsoLeft,
+                    torsoBottom - torsoTop
+                  );
+                  const data = imageData.data;
 
-                // Analyze brightness distribution (works for all colors)
-                let brightPixels = 0;
-                let darkPixels = 0;
-                const brightnessMap = {};
+                  // Analyze brightness distribution (works for all colors)
+                  let brightPixels = 0;
+                  let darkPixels = 0;
+                  const brightnessMap = {};
 
-                for (let i = 0; i < data.length; i += 4) {
-                  const r = data[i];
-                  const g = data[i + 1];
-                  const b = data[i + 2];
-                  const a = data[i + 3];
+                  for (let i = 0; i < data.length; i += 4) {
+                    const r = data[i];
+                    const g = data[i + 1];
+                    const b = data[i + 2];
+                    const a = data[i + 3];
 
-                  if (a < 180) continue;
+                    if (a < 180) continue;
 
-                  // Calculate brightness using luminance
-                  const brightness = Math.round((r * 0.299 + g * 0.587 + b * 0.114) / 10);
-                  brightnessMap[brightness] = (brightnessMap[brightness] || 0) + 1;
+                    // Calculate brightness using luminance
+                    const brightness = Math.round((r * 0.299 + g * 0.587 + b * 0.114) / 10);
+                    brightnessMap[brightness] = (brightnessMap[brightness] || 0) + 1;
 
-                  if (brightness > 20) brightPixels++;
-                  else darkPixels++;
-                }
-
-                // Find most common brightness level (shirt area)
-                let dominantBrightness = 0;
-                let maxBrightnessCount = 0;
-                for (const [brightness, count] of Object.entries(brightnessMap)) {
-                  if (count > maxBrightnessCount) {
-                    maxBrightnessCount = count;
-                    dominantBrightness = parseInt(brightness);
+                    if (brightness > 20) brightPixels++;
+                    else darkPixels++;
                   }
+
+                  // Find most common brightness level (shirt area)
+                  let dominantBrightness = 0;
+                  let maxBrightnessCount = 0;
+                  for (const [brightness, count] of Object.entries(brightnessMap)) {
+                    if (count > maxBrightnessCount) {
+                      maxBrightnessCount = count;
+                      dominantBrightness = parseInt(brightness);
+                    }
+                  }
+                  console.log(`[Auto-Placement] Dominant brightness: ${dominantBrightness}`);
+
+                  // Refine margins based on shirt type
+                  // Light shirts (white, light green) = narrow margins
+                  // Dark shirts (black, purple) = adjusted margins
+                  let marginX = pw * 0.08;
+                  let marginY = ph * 0.12;
+
+                  if (dominantBrightness < 12) {
+                    // Dark shirt - use tighter margins
+                    marginX = pw * 0.06;
+                    marginY = ph * 0.1;
+                  } else if (dominantBrightness > 18) {
+                    // Light shirt - keep standard margins
+                    marginX = pw * 0.08;
+                    marginY = ph * 0.12;
+                  } else {
+                    // Medium shirt - balanced margins
+                    marginX = pw * 0.07;
+                    marginY = ph * 0.11;
+                  }
+
+                  // Use refined shirt bounds from AI detection + brightness analysis
+                  shirtBounds = {
+                    left: px + marginX,
+                    top: py + marginY,
+                    width: pw - marginX * 2,
+                    height: ph * 0.65 - marginY
+                  };
+                  console.log(`[Auto-Placement] Shirt bounds calculated: x=${shirtBounds.left.toFixed(0)}, y=${shirtBounds.top.toFixed(0)}, w=${shirtBounds.width.toFixed(0)}, h=${shirtBounds.height.toFixed(0)}`);
+                } catch (colorErr) {
+                  console.log(`[Auto-Placement] Color analysis failed, using basic person bounds`);
+                  shirtBounds = {
+                    left: px + pw * 0.1,
+                    top: py + ph * 0.2,
+                    width: pw * 0.8,
+                    height: ph * 0.5
+                  };
                 }
-
-                // Refine margins based on shirt type
-                // Light shirts (white, light green) = narrow margins
-                // Dark shirts (black, purple) = adjusted margins
-                let marginX = pw * 0.08;
-                let marginY = ph * 0.12;
-
-                if (dominantBrightness < 12) {
-                  // Dark shirt - use tighter margins
-                  marginX = pw * 0.06;
-                  marginY = ph * 0.1;
-                } else if (dominantBrightness > 18) {
-                  // Light shirt - keep standard margins
-                  marginX = pw * 0.08;
-                  marginY = ph * 0.12;
-                } else {
-                  // Medium shirt - balanced margins
-                  marginX = pw * 0.07;
-                  marginY = ph * 0.11;
-                }
-
-                // Use refined shirt bounds from AI detection + brightness analysis
-                shirtBounds = {
-                  left: px + marginX,
-                  top: py + marginY,
-                  width: pw - marginX * 2,
-                  height: ph * 0.65 - marginY
-                };
               }
 
               // If no person detected, use fallback
@@ -1240,17 +1257,69 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
               // Always apply auto-placement when calculated
               // This ensures optimal placement for every mockup
               if (autoPlacement) {
+                console.log(`[Auto-Placement] Applied: left=${autoPlacement.left.toFixed(1)}%, top=${autoPlacement.top.toFixed(1)}%, w=${autoPlacement.width.toFixed(1)}%, h=${autoPlacement.height.toFixed(1)}%`);
                 onChange(autoPlacement);
               }
             } catch (err) {
-              console.log("Advanced detection skipped, using fallback");
+              console.error(`[Auto-Placement] Detection failed:`, err.message);
+              // Smart fallback: Use design aspect ratio to calculate reasonable placement
+              console.log(`[Auto-Placement] Applying smart fallback...`);
+
+              const mockupW = mockupImg.width;
+              const mockupH = mockupImg.height;
+              const mockupAspectRatio = mockupW / mockupH;
+
+              // Estimate shirt area based on mockup aspect ratio
+              let shirtEstimate = {
+                left: mockupW * 0.15,
+                top: mockupH * 0.25,
+                width: mockupW * 0.7,
+                height: mockupH * 0.45
+              };
+
+              // Calculate optimal design size based on aspect ratio
+              const shirtAspectRatio = shirtEstimate.width / shirtEstimate.height;
+              let finalWidth, finalHeight;
+
+              if (designAspectRatio > shirtAspectRatio) {
+                // Design wider - fit to width
+                finalWidth = (shirtEstimate.width / mockupW) * 100 * 0.88;
+                finalHeight = (finalWidth * mockupW / 100) / designAspectRatio / mockupH * 100;
+              } else {
+                // Design taller - fit to height
+                finalHeight = (shirtEstimate.height / mockupH) * 100 * 0.88;
+                finalWidth = (finalHeight * mockupH / 100) * designAspectRatio / mockupW * 100;
+              }
+
+              // Center in estimated shirt area
+              const designWidthPx = (finalWidth * mockupW / 100);
+              const designHeightPx = (finalHeight * mockupH / 100);
+              const centerX = shirtEstimate.left + (shirtEstimate.width - designWidthPx) / 2;
+              const centerY = shirtEstimate.top + (shirtEstimate.height - designHeightPx) / 2;
+
+              const fallbackPlacement = {
+                left: (centerX / mockupW) * 100,
+                top: (centerY / mockupH) * 100,
+                width: finalWidth,
+                height: finalHeight,
+                opacity: placement.opacity || 100
+              };
+
+              console.log(`[Auto-Placement] Fallback applied: left=${fallbackPlacement.left.toFixed(1)}%, top=${fallbackPlacement.top.toFixed(1)}%, w=${fallbackPlacement.width.toFixed(1)}%, h=${fallbackPlacement.height.toFixed(1)}%`);
+              onChange(fallbackPlacement);
             }
+          };
+          mockupImg.onerror = () => {
+            console.error(`[Auto-Placement] Mockup image failed to load`);
           };
           mockupImg.src = referenceSrc;
         };
+        designImg.onerror = () => {
+          console.error(`[Auto-Placement] Design image failed to load`);
+        };
         designImg.src = designSrc;
       } catch (err) {
-        console.log("Design analysis failed");
+        console.error(`[Auto-Placement] Outer try-catch error:`, err.message);
       }
     };
 
