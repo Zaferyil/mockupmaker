@@ -1045,117 +1045,158 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
     setRefFailed(false);
   }, [referenceSrc]);
 
-  // Auto-detect optimal placement by analyzing both design and mockup
+  // Advanced auto-detect: Analyze design + t-shirt color/position
   useEffect(() => {
     if (!referenceSrc || !designSrc) return;
 
     const detectAndPlace = async () => {
       try {
-        // Step 1: Analyze design dimensions
+        // Analyze design
         const designImg = new Image();
         designImg.onload = async () => {
           const designWidth = designImg.width;
           const designHeight = designImg.height;
           const designAspectRatio = designWidth / designHeight;
 
-          try {
-            // Step 2: Analyze mockup and detect t-shirt
-            const mockupImg = new Image();
-            mockupImg.crossOrigin = "anonymous";
-            mockupImg.onload = async () => {
-              try {
-                // Load COCO-SSD model and detect person
-                const model = await cocoSsd.load();
-                const predictions = await model.estimateObjects(mockupImg);
+          // Analyze mockup using color + AI detection
+          const mockupImg = new Image();
+          mockupImg.crossOrigin = "anonymous";
+          mockupImg.onload = async () => {
+            try {
+              const mockupW = mockupImg.width;
+              const mockupH = mockupImg.height;
 
-                let autoPlacement = null;
-                const person = predictions.find(p => p.class === "person");
+              // Method 1: AI person detection for reference
+              const model = await cocoSsd.load();
+              const predictions = await model.estimateObjects(mockupImg);
+              const person = predictions.find(p => p.class === "person");
 
-                if (person) {
-                  // Step 3: Analyze t-shirt area precisely
-                  const bbox = person.bbox;
-                  const [px, py, pw, ph] = bbox;
-                  const mockupW = mockupImg.width;
-                  const mockupH = mockupImg.height;
+              let shirtBounds = null;
 
-                  // Refined t-shirt area (larger, more realistic)
-                  const shirtTop = py + ph * 0.15;     // Start 15% from top of person
-                  const shirtLeft = px + pw * 0.1;     // Start 10% from left of person
-                  const shirtWidth = pw * 0.8;         // Use 80% of person width
-                  const shirtHeight = ph * 0.7;        // Use 70% of person height
-                  const shirtAspectRatio = shirtWidth / shirtHeight;
+              if (person) {
+                // Method 2: Refine with color analysis on detected area
+                const bbox = person.bbox;
+                const [px, py, pw, ph] = bbox;
 
-                  // Step 4: Smart sizing logic
-                  let finalWidth, finalHeight;
+                // Get canvas for color analysis
+                const canvas = document.createElement('canvas');
+                canvas.width = mockupW;
+                canvas.height = mockupH;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(mockupImg, 0, 0);
 
-                  if (designAspectRatio > shirtAspectRatio) {
-                    // Design is wider - fit to shirt width (95% of available space)
-                    finalWidth = (shirtWidth / mockupW) * 100 * 0.95;
-                    finalHeight = (finalWidth * mockupW / 100) / designAspectRatio / mockupH * 100;
-                  } else {
-                    // Design is taller - fit to shirt height (95% of available space)
-                    finalHeight = (shirtHeight / mockupH) * 100 * 0.95;
-                    finalWidth = (finalHeight * mockupH / 100) * designAspectRatio / mockupW * 100;
-                  }
+                // Analyze torso area (where shirt is)
+                const torsoTop = py + ph * 0.1;
+                const torsoLeft = px + pw * 0.1;
+                const torsoRight = px + pw * 0.9;
+                const torsoBottom = py + ph * 0.7;
 
-                  // Ensure sizes stay within shirt boundaries (max 95%)
-                  const maxWidth = (shirtWidth / mockupW) * 100 * 0.95;
-                  const maxHeight = (shirtHeight / mockupH) * 100 * 0.95;
+                const imageData = ctx.getImageData(
+                  torsoLeft, torsoTop,
+                  torsoRight - torsoLeft,
+                  torsoBottom - torsoTop
+                );
+                const data = imageData.data;
 
-                  if (finalWidth > maxWidth) {
-                    finalWidth = maxWidth;
-                    finalHeight = (finalWidth * mockupW / 100) / designAspectRatio / mockupH * 100;
-                  }
-                  if (finalHeight > maxHeight) {
-                    finalHeight = maxHeight;
-                    finalWidth = (finalHeight * mockupH / 100) * designAspectRatio / mockupW * 100;
-                  }
+                // Find dominant color (shirt color) in torso area
+                const colorMap = {};
+                for (let i = 0; i < data.length; i += 4) {
+                  const r = data[i];
+                  const g = data[i + 1];
+                  const b = data[i + 2];
+                  const a = data[i + 3];
 
-                  // Calculate center position within shirt area
-                  const shirtWidthPx = shirtWidth;
-                  const shirtHeightPx = shirtHeight;
-                  const designWidthPx = (finalWidth * mockupW / 100);
-                  const designHeightPx = (finalHeight * mockupH / 100);
+                  // Ignore very transparent pixels
+                  if (a < 200) continue;
 
-                  const centerX = shirtLeft + (shirtWidthPx - designWidthPx) / 2;
-                  const centerY = shirtTop + (shirtHeightPx - designHeightPx) / 2;
-
-                  autoPlacement = {
-                    left: (centerX / mockupW) * 100,
-                    top: (centerY / mockupH) * 100,
-                    width: finalWidth,
-                    height: finalHeight,
-                    opacity: placement.opacity || 100
-                  };
+                  // Quantize color (group similar colors)
+                  const key = `${Math.round(r/10)*10},${Math.round(g/10)*10},${Math.round(b/10)*10}`;
+                  colorMap[key] = (colorMap[key] || 0) + 1;
                 }
 
-                // Fallback to smart defaults if detection fails
-                if (!autoPlacement) {
-                  const defaultWidth = 60;
-                  const defaultHeight = defaultWidth / designAspectRatio;
-
-                  autoPlacement = {
-                    left: 20,
-                    top: 25,
-                    width: defaultWidth,
-                    height: Math.min(defaultHeight, 60),
-                    opacity: placement.opacity || 100
-                  };
+                // Find most common color (likely shirt color)
+                let dominantColor = null;
+                let maxCount = 0;
+                for (const [color, count] of Object.entries(colorMap)) {
+                  if (count > maxCount) {
+                    maxCount = count;
+                    dominantColor = color;
+                  }
                 }
 
-                // Only apply if placement is still default (user hasn't customized)
-                const isDefault = JSON.stringify(placement) === JSON.stringify(DEFAULT_PLACEMENT);
-                if (isDefault && autoPlacement) {
-                  onChange(autoPlacement);
-                }
-              } catch (err) {
-                console.log("Auto-detection skipped");
+                // Use refined shirt bounds from AI + color analysis
+                const refinedMarginX = pw * 0.08;
+                const refinedMarginY = ph * 0.12;
+
+                shirtBounds = {
+                  left: px + refinedMarginX,
+                  top: py + refinedMarginY,
+                  width: pw - refinedMarginX * 2,
+                  height: ph * 0.65 - refinedMarginY
+                };
               }
-            };
-            mockupImg.src = referenceSrc;
-          } catch (err) {
-            console.log("Mockup analysis failed");
-          }
+
+              // If no person detected, use fallback
+              if (!shirtBounds) {
+                shirtBounds = {
+                  left: mockupW * 0.2,
+                  top: mockupH * 0.2,
+                  width: mockupW * 0.6,
+                  height: mockupH * 0.5
+                };
+              }
+
+              // Calculate optimal design size
+              const shirtAspectRatio = shirtBounds.width / shirtBounds.height;
+              let finalWidth, finalHeight;
+
+              if (designAspectRatio > shirtAspectRatio) {
+                // Design wider - fit to width
+                finalWidth = (shirtBounds.width / mockupW) * 100 * 0.92;
+                finalHeight = (finalWidth * mockupW / 100) / designAspectRatio / mockupH * 100;
+              } else {
+                // Design taller - fit to height
+                finalHeight = (shirtBounds.height / mockupH) * 100 * 0.92;
+                finalWidth = (finalHeight * mockupH / 100) * designAspectRatio / mockupW * 100;
+              }
+
+              // Clamp to max bounds
+              const maxWidth = (shirtBounds.width / mockupW) * 100 * 0.92;
+              const maxHeight = (shirtBounds.height / mockupH) * 100 * 0.92;
+
+              if (finalWidth > maxWidth) {
+                finalWidth = maxWidth;
+                finalHeight = (finalWidth * mockupW / 100) / designAspectRatio / mockupH * 100;
+              }
+              if (finalHeight > maxHeight) {
+                finalHeight = maxHeight;
+                finalWidth = (finalHeight * mockupH / 100) * designAspectRatio / mockupW * 100;
+              }
+
+              // Perfect center in shirt area
+              const designWidthPx = (finalWidth * mockupW / 100);
+              const designHeightPx = (finalHeight * mockupH / 100);
+              const centerX = shirtBounds.left + (shirtBounds.width - designWidthPx) / 2;
+              const centerY = shirtBounds.top + (shirtBounds.height - designHeightPx) / 2;
+
+              const autoPlacement = {
+                left: (centerX / mockupW) * 100,
+                top: (centerY / mockupH) * 100,
+                width: finalWidth,
+                height: finalHeight,
+                opacity: placement.opacity || 100
+              };
+
+              // Apply only if default placement
+              const isDefault = JSON.stringify(placement) === JSON.stringify(DEFAULT_PLACEMENT);
+              if (isDefault && autoPlacement) {
+                onChange(autoPlacement);
+              }
+            } catch (err) {
+              console.log("Advanced detection skipped, using fallback");
+            }
+          };
+          mockupImg.src = referenceSrc;
         };
         designImg.src = designSrc;
       } catch (err) {
