@@ -1040,14 +1040,20 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
   const containerRef = useRef(null);
   const dragRef = useRef(null);
   const [refFailed, setRefFailed] = useState(false);
+  const autoPlacedRef = useRef(false);
 
   useEffect(() => {
     setRefFailed(false);
   }, [referenceSrc]);
 
   // Advanced auto-detect: Analyze design + t-shirt color/position
+  // Only runs on first load when placement is default
   useEffect(() => {
     if (!referenceSrc || !designSrc) return;
+
+    // Skip if already auto-placed (prevents re-triggering on color change)
+    const isDefault = JSON.stringify(placement) === JSON.stringify(DEFAULT_PLACEMENT);
+    if (!isDefault || autoPlacedRef.current) return;
 
     const detectAndPlace = async () => {
       try {
@@ -1191,6 +1197,7 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
               const isDefault = JSON.stringify(placement) === JSON.stringify(DEFAULT_PLACEMENT);
               if (isDefault && autoPlacement) {
                 onChange(autoPlacement);
+                autoPlacedRef.current = true; // Mark as auto-placed
               }
             } catch (err) {
               console.log("Advanced detection skipped, using fallback");
