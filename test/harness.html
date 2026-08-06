@@ -1,0 +1,244 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>placement harness</title>
+<body>
+<script type="module">
+import { segmentGarment } from "/src/placement/garmentMask.js";
+import { computeChestArea } from "/src/placement/chestArea.js";
+import { solvePlacement } from "/src/placement/solve.js";
+import { analyzeArtwork, canvasRectForInk } from "/src/placement/artwork.js";
+import { validatePlacement, enforce } from "/src/placement/validate.js";
+import { deriveHeight } from "/src/placement/contract.js";
+
+// ---- synthetic mockup generator -------------------------------------
+// Draws a t-shirt on a contrasting background. Parameters let us vary the
+// things that were breaking placement in production: colour, scale, position,
+// tilt and framing.
+function makeShirt({ w = 900, h = 1100, shirtColor = "#c0397a", cx = 0.5, cy = 0.45,
+                     scale = 1, tilt = 0, bg = "#efe7dc", skin = "#d8a882" } = {}) {
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const g = c.getContext("2d");
+  g.fillStyle = bg; g.fillRect(0, 0, w, h);
+
+  const CX = w * cx, CY = h * cy;
+  const bodyW = w * 0.44 * scale, bodyH = h * 0.5 * scale;
+
+  g.save();
+  g.translate(CX, CY);
+  g.rotate((tilt * Math.PI) / 180);
+
+  // sleeves
+  g.fillStyle = shirtColor;
+  g.beginPath();
+  g.moveTo(-bodyW / 2, -bodyH / 2);
+  g.lineTo(-bodyW * 0.92, -bodyH * 0.28);
+  g.lineTo(-bodyW * 0.72, -bodyH * 0.05);
+  g.lineTo(-bodyW / 2, -bodyH * 0.18);
+  g.closePath(); g.fill();
+  g.beginPath();
+  g.moveTo(bodyW / 2, -bodyH / 2);
+  g.lineTo(bodyW * 0.92, -bodyH * 0.28);
+  g.lineTo(bodyW * 0.72, -bodyH * 0.05);
+  g.lineTo(bodyW / 2, -bodyH * 0.18);
+  g.closePath(); g.fill();
+
+  // body
+  g.fillRect(-bodyW / 2, -bodyH / 2, bodyW, bodyH);
+
+  // neck opening (skin shows through) — the collar notch the detector looks for
+  g.fillStyle = skin;
+  g.beginPath();
+  g.ellipse(0, -bodyH / 2 + bodyH * 0.02, bodyW * 0.17, bodyH * 0.055, 0, 0, Math.PI * 2);
+  g.fill();
+
+  // soft fold shading: varies luminance a lot, chromaticity barely — exactly
+  // what the segmenter is supposed to grow straight through.
+  g.globalAlpha = 0.16;
+  g.fillStyle = "#000";
+  for (let i = 0; i < 7; i++) {
+    g.beginPath();
+    g.ellipse(-bodyW * 0.3 + i * bodyW * 0.1, bodyH * 0.1, bodyW * 0.035, bodyH * 0.34, 0.15, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.globalAlpha = 1;
+  g.restore();
+  return c.toDataURL("image/png");
+}
+
+// ---- synthetic artwork ----------------------------------------------
+function makeArtwork({ w, h, pad = 0 }) {
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const g = c.getContext("2d");
+  g.clearRect(0, 0, w, h);
+  const px = w * pad, py = h * pad;
+  g.fillStyle = "#1b2c6b";
+  g.fillRect(px, py, w - px * 2, h - py * 2);
+  g.fillStyle = "#ffd23f";
+  g.fillRect(px + (w - px * 2) * 0.2, py + (h - py * 2) * 0.3, (w - px * 2) * 0.6, (h - py * 2) * 0.4);
+  return c.toDataURL("image/png");
+}
+
+const load = (src) => new Promise((res, rej) => {
+  const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src;
+});
+
+async function measure(shirtOpts, artSrc) {
+  const img = await load(makeShirt(shirtOpts));
+  const art = analyzeArtwork(await load(artSrc));
+  const garment = segmentGarment(img, null);
+  if (!garment) return { error: "segmentation failed" };
+  const chest = computeChestArea(garment, art);
+  if (!chest) return { error: "chest area failed" };
+  const imageAspect = img.width / img.height;
+  const placement = solvePlacement(chest, art, imageAspect, 100);
+  const validation = validatePlacement(placement, chest, art, imageAspect);
+  return { chest, placement, validation, art, imageAspect, maskConfidence: garment.confidence };
+}
+
+const results = {};
+const square = makeArtwork({ w: 800, h: 800 });
+
+// 1. determinism — identical input twice
+{
+  const a = await measure({}, square);
+  const b = await measure({}, square);
+  results.determinism = {
+    a: a.placement, b: b.placement,
+    identical: JSON.stringify(a.placement) === JSON.stringify(b.placement),
+  };
+}
+
+// 2. colour invariance — same geometry, six very different shirt colours.
+//    This is the "works on white, breaks on navy" complaint.
+{
+  const colors = ["#ffffff", "#111318", "#c0397a", "#2f4d7a", "#5c6b4a", "#8a4b2a"];
+  const out = [];
+  for (const shirtColor of colors) {
+    const r = await measure({ shirtColor }, square);
+    out.push(r.error ? { shirtColor, error: r.error } : {
+      shirtColor,
+      cx: +r.placement.centerX.toFixed(4),
+      cy: +r.placement.centerY.toFixed(4),
+      w: +r.placement.width.toFixed(4),
+    });
+  }
+  const ok = out.filter((o) => !o.error);
+  results.colorInvariance = {
+    samples: out,
+    cxSpread: ok.length ? Math.max(...ok.map(o=>o.cx)) - Math.min(...ok.map(o=>o.cx)) : null,
+    cySpread: ok.length ? Math.max(...ok.map(o=>o.cy)) - Math.min(...ok.map(o=>o.cy)) : null,
+    wSpread:  ok.length ? Math.max(...ok.map(o=>o.w))  - Math.min(...ok.map(o=>o.w))  : null,
+  };
+}
+
+// 3. translation tracking — shirt moved right; placement must follow it
+{
+  const base = await measure({ cx: 0.5 }, square);
+  const moved = await measure({ cx: 0.62 }, square);
+  results.translation = {
+    baseCx: +base.placement.centerX.toFixed(4),
+    movedCx: +moved.placement.centerX.toFixed(4),
+    delta: +(moved.placement.centerX - base.placement.centerX).toFixed(4),
+    expected: 0.12,
+  };
+}
+
+// 4. scale invariance — bigger shirt, print must scale with the garment
+{
+  const small = await measure({ scale: 1 }, square);
+  const big = await measure({ scale: 1.3 }, square);
+  results.scale = {
+    smallW: +small.placement.width.toFixed(4),
+    bigW: +big.placement.width.toFixed(4),
+    ratio: +(big.placement.width / small.placement.width).toFixed(3),
+    expected: 1.3,
+  };
+}
+
+// 5. transparent padding — the same visible design with and without a 25%
+//    transparent margin must render identical ink.
+{
+  const tight = makeArtwork({ w: 800, h: 800, pad: 0 });
+  const padded = makeArtwork({ w: 800, h: 800, pad: 0.25 });
+  const a = await measure({}, tight);
+  const b = await measure({}, padded);
+
+  const inkOf = (r) => {
+    const W = 1000, H = 1000 / r.imageAspect;
+    const h = deriveHeight(r.placement.width, r.art.visibleAspect, r.imageAspect);
+    return { w: +(r.placement.width * W).toFixed(1), h: +(h * H).toFixed(1) };
+  };
+  const canvasOf = (r) => {
+    const W = 1000, H = 1000 / r.imageAspect;
+    const h = deriveHeight(r.placement.width, r.art.visibleAspect, r.imageAspect);
+    const ink = { x: (r.placement.centerX - r.placement.width/2)*W, y: (r.placement.centerY - h/2)*H,
+                  w: r.placement.width*W, h: h*H };
+    const full = canvasRectForInk(r.art, ink);
+    return { w: +full.w.toFixed(1), h: +full.h.toFixed(1) };
+  };
+
+  results.padding = {
+    tightTrim: a.art.trim, paddedTrim: b.art.trim,
+    tightPaddingRatio: +a.art.paddingRatio.toFixed(3),
+    paddedPaddingRatio: +b.art.paddingRatio.toFixed(3),
+    tightInk: inkOf(a), paddedInk: inkOf(b),
+    tightDrawnCanvas: canvasOf(a), paddedDrawnCanvas: canvasOf(b),
+  };
+}
+
+// 6. aspect preservation across very different artwork shapes
+{
+  const shapes = [
+    { name: "square", w: 800, h: 800 },
+    { name: "wide", w: 1600, h: 600 },
+    { name: "tall", w: 600, h: 1600 },
+  ];
+  const out = [];
+  for (const s of shapes) {
+    const r = await measure({}, makeArtwork(s));
+    const h = deriveHeight(r.placement.width, r.art.visibleAspect, r.imageAspect);
+    const renderedAspect = (r.placement.width / h) * r.imageAspect;
+    out.push({
+      name: s.name,
+      sourceAspect: +(s.w / s.h).toFixed(4),
+      renderedAspect: +renderedAspect.toFixed(4),
+      cx: +r.placement.centerX.toFixed(4),
+      cy: +r.placement.centerY.toFixed(4),
+      width: +r.placement.width.toFixed(4),
+      valid: r.validation.ok,
+      failures: r.validation.failures,
+    });
+  }
+  results.aspect = out;
+}
+
+// 7. QC repair — a deliberately broken placement must come back legal
+{
+  const r = await measure({}, square);
+  const broken = { ...r.placement, centerX: 0.95, width: 1.4 };
+  const fixed = enforce(broken, r.chest, r.art, r.imageAspect);
+  results.qc = {
+    brokenValid: validatePlacement(broken, r.chest, r.art, r.imageAspect).ok,
+    repairs: fixed.repairs,
+    fixedValid: fixed.validation.ok,
+    fixed: { cx: +fixed.placement.centerX.toFixed(4), w: +fixed.placement.width.toFixed(4) },
+  };
+}
+
+// 8. tilt — a leaning model should produce a matching artwork rotation
+{
+  const straight = await measure({ tilt: 0 }, square);
+  const leaning = await measure({ tilt: 8 }, square);
+  results.tilt = {
+    straight: +straight.placement.rotation.toFixed(2),
+    leaning: +leaning.placement.rotation.toFixed(2),
+    pose: leaning.chest.analysis.pose,
+  };
+}
+
+window.__RESULTS__ = results;
+document.title = "done";
+</script>
+</body>

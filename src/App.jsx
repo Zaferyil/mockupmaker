@@ -18,8 +18,17 @@ import {
 import { LoginPage } from "./LoginPage";
 import { AdminPanel } from "./AdminPanel";
 import { getCurrentUser, logout, getUserR2Path } from "./auth";
-import * as tf from "@tensorflow/tfjs";
-import * as cocoSsd from "@tensorflow-models/coco-ssd";
+import {
+  createLockStore,
+  importPlacements,
+  fromLegacy,
+  resolvePlacement,
+  loadImage,
+  toBox,
+  fromBox,
+  deriveHeight,
+} from "./placement/index.js";
+import { renderMockup } from "./placement/compositor.js";
 
 // ============================================================
 // Design tokens: coral / teal / violet / yellow
@@ -229,14 +238,17 @@ function MockupStudio() {
   const [selectedKeys, setSelectedKeys] = useState([]);
 
   const [designImg, setDesignImg] = useState(null);
-  // Gerçek fotoğraflar birbirinden farklı kadrajlanmış olabilir; bu yüzden yerleşim tek bir
-  // global değer değil, düzenlenmekte olan mockup dosyasının anahtarına göre ayrı ayrı tutulur.
-  // Kalibre edilen koordinatlar R2 worker'ında kalıcı olarak saklanır.
-  const [placements, setPlacements] = useState({});
+  // Placement geometry lives in a Template Lock store, not in component state.
+  // A lock is per-mockup and artwork-independent, so it is measured once and
+  // then reused for every design that is ever uploaded onto that template.
+  const locksRef = useRef(createLockStore());
+  // key -> { placement, artwork, imageAspect, report } produced by the pipeline
+  const [resolved, setResolved] = useState({});
   const [activeEntryKey, setActiveEntryKey] = useState(null);
   const [placementsSaveStatus, setPlacementsSaveStatus] = useState("idle"); // idle | saving | saved | error
+  const [placementStatus, setPlacementStatus] = useState("idle"); // idle | analyzing | ready
   const placementsLoadedRef = useRef(false);
-  const skipNextSaveRef = useRef(false);
+  const saveTimerRef = useRef(null);
   const [generated, setGenerated] = useState(false);
   const [zipStatus, setZipStatus] = useState("idle"); // idle | zipping | error
 
@@ -270,7 +282,11 @@ function MockupStudio() {
     };
   }, []);
 
-  // Sayfa açılışında daha önce kalibre edilmiş yerleşimleri worker'dan çek
+  // Load saved template locks. Records written by older builds are in the
+  // percent-box format; importPlacements migrates them and marks every one as
+  // a *pinned* lock, because the only reason such a record exists is that a
+  // human dragged the design there. Those hand-calibrations outrank anything
+  // the solver produces and are never overwritten.
   useEffect(() => {
     if (!R2_PLACEMENTS_URL) {
       placementsLoadedRef.current = true;
@@ -281,17 +297,12 @@ function MockupStudio() {
       .then((res) => (res.ok ? res.json() : {}))
       .then((data) => {
         if (cancelled) return;
-        if (data && typeof data === "object") {
-          // Eski sürümlerin bıraktığı "__colors__" gibi ayrılmış anahtarları yok say
-          const clean = Object.fromEntries(Object.entries(data).filter(([k]) => !k.startsWith("__")));
-          // Yüklemenin tetiklediği state değişimi geri-kaydetme döngüsüne girmesin
-          skipNextSaveRef.current = true;
-          setPlacements(clean);
-        }
+        const imported = importPlacements(data, fromLegacy);
+        locksRef.current = createLockStore(imported);
+        console.log(`[placement] imported ${Object.keys(imported).length} template lock(s)`);
       })
       .catch(() => {
-        // Okuma başarısız olursa boş haritayla devam edilir — sürükleme yine çalışır,
-        // sadece o oturumda kalıcı hale gelmez.
+        // Read failed — drag/drop still works, it just won't persist.
       })
       .finally(() => {
         if (!cancelled) placementsLoadedRef.current = true;
@@ -301,19 +312,18 @@ function MockupStudio() {
     };
   }, []);
 
-  // Kullanıcı bir mockup'ı sürükleyip bıraktıkça, kısa bir bekleme sonrası otomatik kaydet
-  useEffect(() => {
+  // Debounced persistence, called explicitly whenever a lock changes rather
+  // than by watching a state object. Locks live in a ref, so an effect on
+  // state would miss solver-written locks entirely.
+  function persistLocks() {
     if (!R2_PLACEMENTS_URL || !placementsLoadedRef.current) return;
-    if (skipNextSaveRef.current) {
-      skipNextSaveRef.current = false;
-      return;
-    }
     setPlacementsSaveStatus("saving");
-    const timeout = setTimeout(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
       fetch(R2_PLACEMENTS_URL, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(placements),
+        body: JSON.stringify(locksRef.current.toJSON()),
       })
         .then((res) => {
           if (!res.ok) throw new Error(`save failed: ${res.status}`);
@@ -321,8 +331,7 @@ function MockupStudio() {
         })
         .catch(() => setPlacementsSaveStatus("error"));
     }, 900);
-    return () => clearTimeout(timeout);
-  }, [placements]);
+  }
 
   // R2 anahtarlarını klasörlere ayır
   const folders = useMemo(() => {
@@ -398,13 +407,118 @@ function MockupStudio() {
 
   const activeSrc = entries.find((e) => e.key === activeEntryKey)?.src ?? null;
 
-  function getPlacement(key) {
-    const k = key ?? "__default__";
-    return placements[k] ?? DEFAULT_PLACEMENT;
+  // ---- placement resolution -------------------------------------------
+  // Runs the pipeline once per (template, artwork) pair. A template that
+  // already has a lock skips detection entirely; one that does not is measured
+  // and then locked, so it never gets measured again.
+  const entriesSignature = entries.map((e) => e.key).join("|");
+
+  useEffect(() => {
+    if (!designImg || entries.length === 0) return;
+    let cancelled = false;
+
+    (async () => {
+      setPlacementStatus("analyzing");
+      let solvedAny = false;
+
+      for (const entry of entries) {
+        if (cancelled) return;
+        if (!entry.src) continue;
+        try {
+          const result = await resolvePlacement({
+            templateId: entry.key,
+            mockupSrc: entry.src,
+            artworkSrc: designImg,
+            locks: locksRef.current,
+            opacity: 100,
+            log: (msg) => console.log(msg),
+          });
+          if (cancelled) return;
+          if (result.report.tier === "solved") solvedAny = true;
+          setResolved((prev) => ({ ...prev, [entry.key]: result }));
+        } catch (err) {
+          console.error(`[placement] ${entry.key} failed:`, err.message);
+        }
+      }
+
+      if (!cancelled) {
+        setPlacementStatus("ready");
+        // Newly measured templates produced new locks worth persisting.
+        if (solvedAny) persistLocks();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [designImg, entriesSignature]);
+
+  const activeResolved = activeEntryKey ? resolved[activeEntryKey] : null;
+
+  /**
+   * A human moved or resized the design. That is ground truth: pin it, so the
+   * solver never touches this template again and every future artwork lands in
+   * the same place.
+   */
+  function handleManualPlacement(key, box) {
+    const current = resolved[key];
+    if (!current) return;
+
+    const placement = fromBox(
+      { ...box, rotation: current.placement.rotation, opacity: current.placement.opacity },
+      "manual",
+    );
+    placement.perspective = current.placement.perspective;
+
+    const height = deriveHeight(placement.width, current.artwork.visibleAspect, current.imageAspect);
+    locksRef.current.setPinned(key, placement, height);
+
+    setResolved((prev) => ({ ...prev, [key]: { ...prev[key], placement } }));
+    persistLocks();
   }
-  function setPlacementFor(key, next) {
-    const k = key ?? "__default__";
-    setPlacements((prev) => ({ ...prev, [k]: next }));
+
+  /** Opacity is a render property, not geometry — it never touches the lock. */
+  function setOpacityFor(key, opacity) {
+    setResolved((prev) => {
+      const cur = prev[key];
+      if (!cur) return prev;
+      return { ...prev, [key]: { ...cur, placement: { ...cur.placement, opacity } } };
+    });
+  }
+
+  /**
+   * Copy the active template's calibrated geometry to every selected mockup.
+   * Because placements are normalized, the same centre and width transfer
+   * correctly across mockups of different pixel dimensions.
+   */
+  function applyPlacementToAll() {
+    const source = resolved[activeEntryKey];
+    if (!source) return;
+
+    setResolved((prev) => {
+      const next = { ...prev };
+      for (const key of selectedKeys) {
+        const target = next[key];
+        if (!target) continue;
+        // Reuse centre, width and rotation; height re-derives from this
+        // template's own aspect ratio so nothing is stretched.
+        const placement = {
+          ...target.placement,
+          centerX: source.placement.centerX,
+          centerY: source.placement.centerY,
+          width: source.placement.width,
+          rotation: source.placement.rotation,
+          source: "manual",
+          confidence: 1,
+        };
+        const height = deriveHeight(placement.width, target.artwork.visibleAspect, target.imageAspect);
+        locksRef.current.setPinned(key, placement, height);
+        next[key] = { ...target, placement };
+      }
+      return next;
+    });
+    persistLocks();
   }
 
   async function handleDesignUpload(e) {
@@ -754,15 +868,7 @@ function MockupStudio() {
                     </div>
                 )}
 
-                {designImg && (() => {
-                  const handleApplyToAll = () => {
-                    const currentPlacement = getPlacement(activeEntryKey);
-                    selectedKeys.forEach(key => {
-                      setPlacementFor(key, currentPlacement);
-                    });
-                  };
-
-                  return (
+                {designImg && (
                     <div className="space-y-3">
                       {/* Design Placer */}
                       <div className="flex justify-center">
@@ -770,18 +876,20 @@ function MockupStudio() {
                           designSrc={designImg}
                           referenceSrc={activeSrc}
                           tshirtColor="#d4d4d8"
-                          placement={getPlacement(activeEntryKey)}
-                          onChange={(next) => setPlacementFor(activeEntryKey, next)}
-                          selectedCount={selectedKeys.length}
-                          onApplyToAll={handleApplyToAll}
+                          resolved={activeResolved}
+                          status={placementStatus}
+                          onChange={(box) => handleManualPlacement(activeEntryKey, box)}
                         />
                         <div className="mt-3 flex flex-col gap-2">
                           <p className="text-xs font-body text-gray-500 flex items-center gap-1">
                             <Move className="w-3 h-3" /> Drag to adjust
                           </p>
+                          {activeResolved && (
+                            <PlacementReport resolved={activeResolved} />
+                          )}
                           {selectedKeys.length > 1 && (
                             <button
-                              onClick={handleApplyToAll}
+                              onClick={applyPlacementToAll}
                               className="px-3 py-2 rounded-lg text-xs font-semibold text-white transition"
                               style={{ backgroundColor: ACCENT.teal }}
                               onMouseEnter={(e) => (e.target.style.opacity = "0.9")}
@@ -809,15 +917,14 @@ function MockupStudio() {
                       <div className="mb-3">
                         <SliderControl
                           label="Transparency"
-                          value={getPlacement(activeEntryKey).opacity}
-                          onChange={(v) => setPlacementFor(activeEntryKey, { ...getPlacement(activeEntryKey), opacity: v })}
+                          value={activeResolved?.placement.opacity ?? 100}
+                          onChange={(v) => setOpacityFor(activeEntryKey, v)}
                           accent={ACCENT.violet}
                         />
                       </div>
                     </div>
                   </div>
-                );
-                })()}
+                )}
 
                 {dockKeys.length > 0 && (
                   <div className="bg-gray-50 rounded p-2">
@@ -888,7 +995,7 @@ function MockupStudio() {
                     label={e.label}
                     mockupSrc={e.src}
                     designSrc={designImg}
-                    placement={getPlacement(e.key)}
+                    resolved={resolved[e.key]}
                     t={t}
                   />
                 ))}
@@ -1044,9 +1151,6 @@ function TShirtSilhouette({ color }) {
 }
 
 const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
-const PRINT_AREA = { left: 12, top: 20, width: 76, height: 60 };
-// Yeni bir mockup ilk kez düzenlenirken tasarımın başlayacağı standart göğüs konumu
-const DEFAULT_PLACEMENT = { left: PRINT_AREA.left, top: PRINT_AREA.top, width: PRINT_AREA.width, height: PRINT_AREA.height, opacity: 100 };
 const HANDLE_CURSOR = {
   nw: "nwse-resize", se: "nwse-resize",
   ne: "nesw-resize", sw: "nesw-resize",
@@ -1059,302 +1163,99 @@ const HANDLE_POS = {
   sw: { left: "0%", top: "100%" }, w: { left: "0%", top: "50%" },
 };
 
-// Fare ile sürükle/boyutlandır — Design & Yerleşim adımındaki canlı önizleme
-function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChange, selectedCount, onApplyToAll }) {
+/**
+ * Resize preserving aspect ratio.
+ *
+ * Only the width is ever solved for; the height follows from the artwork's own
+ * ratio. That is why dragging a corner can no longer stretch a design — there
+ * is no code path that sets height independently. The opposite corner or edge
+ * stays pinned so the box grows from where the user grabbed it.
+ */
+function resizeBox(start, mode, dxPct, dyPct) {
+  const ratio = start.width / start.height;
+  if (!(ratio > 0)) return start;
+
+  const fromHoriz = mode.includes("e")
+    ? start.width + dxPct
+    : mode.includes("w")
+      ? start.width - dxPct
+      : null;
+  const fromVert = mode.includes("n")
+    ? (start.height - dyPct) * ratio
+    : mode.includes("s")
+      ? (start.height + dyPct) * ratio
+      : null;
+
+  let width;
+  if (fromHoriz !== null && fromVert !== null) width = (fromHoriz + fromVert) / 2;
+  else if (fromHoriz !== null) width = fromHoriz;
+  else if (fromVert !== null) width = fromVert;
+  else return start;
+
+  width = clamp(width, 4, 160);
+  const height = width / ratio;
+
+  let left = start.left;
+  let top = start.top;
+  if (mode.includes("w")) left = start.left + start.width - width;
+  else if (!mode.includes("e")) left = start.left + (start.width - width) / 2;
+  if (mode.includes("n")) top = start.top + start.height - height;
+  else if (!mode.includes("s")) top = start.top + (start.height - height) / 2;
+
+  return { ...start, left, top, width, height };
+}
+
+/**
+ * Live preview with drag/resize.
+ *
+ * This component no longer computes placement. It receives a resolved result
+ * from the pipeline and reports user edits back up. Removing the detection
+ * effect that used to live here is what stopped placement from changing on its
+ * own between renders.
+ */
+function DesignPlacer({ designSrc, referenceSrc, tshirtColor, resolved, status, onChange }) {
   const containerRef = useRef(null);
   const dragRef = useRef(null);
   const [refFailed, setRefFailed] = useState(false);
+  const [liveBox, setLiveBox] = useState(null);
 
   useEffect(() => {
     setRefFailed(false);
   }, [referenceSrc]);
 
-  // Advanced auto-detect: Analyze design + t-shirt color/position
-  // Always runs when design or mockup changes to ensure perfect placement every time
+  // Drop the local drag box whenever the pipeline hands us new geometry.
   useEffect(() => {
-    if (!referenceSrc || !designSrc) return;
+    setLiveBox(null);
+  }, [resolved?.placement]);
 
-    // Auto-placement always runs when mockup or design changes
-    // This ensures optimal placement for every mockup/design combination
-
-    const detectAndPlace = async () => {
-      try {
-        // Analyze design
-        const designImg = new Image();
-        designImg.onload = async () => {
-          const designWidth = designImg.width;
-          const designHeight = designImg.height;
-          const designAspectRatio = designWidth / designHeight;
-          console.log(`[Auto-Placement] Design loaded: ${designWidth}x${designHeight}, aspect ratio: ${designAspectRatio.toFixed(2)}`);
-
-          // Analyze mockup using color + AI detection
-          const mockupImg = new Image();
-          mockupImg.crossOrigin = "anonymous";
-          mockupImg.onload = async () => {
-            try {
-              const mockupW = mockupImg.width;
-              const mockupH = mockupImg.height;
-              console.log(`[Auto-Placement] Mockup loaded: ${mockupW}x${mockupH}, aspect ratio: ${(mockupW/mockupH).toFixed(2)}`);
-
-              // Method 1: AI person detection for reference
-              console.log(`[Auto-Placement] Starting AI detection...`);
-              const model = await cocoSsd.load();
-              const predictions = await model.estimateObjects(mockupImg);
-              const person = predictions.find(p => p.class === "person");
-              console.log(`[Auto-Placement] AI detection complete. Person found: ${!!person}`);
-
-              let shirtBounds = null;
-
-              if (person) {
-                // Method 2: Refine with color analysis on detected area
-                const bbox = person.bbox;
-                const [px, py, pw, ph] = bbox;
-                console.log(`[Auto-Placement] Person bbox: x=${px.toFixed(0)}, y=${py.toFixed(0)}, w=${pw.toFixed(0)}, h=${ph.toFixed(0)}`);
-
-                try {
-                  // Get canvas for advanced color analysis
-                  const canvas = document.createElement('canvas');
-                  canvas.width = mockupW;
-                  canvas.height = mockupH;
-                  const ctx = canvas.getContext('2d');
-                  ctx.drawImage(mockupImg, 0, 0);
-
-                  // Analyze central torso area for shirt color
-                  const torsoTop = py + ph * 0.15;
-                  const torsoLeft = px + pw * 0.25;
-                  const torsoRight = px + pw * 0.75;
-                  const torsoBottom = py + ph * 0.65;
-
-                  const imageData = ctx.getImageData(
-                    torsoLeft, torsoTop,
-                    torsoRight - torsoLeft,
-                    torsoBottom - torsoTop
-                  );
-                  const data = imageData.data;
-
-                  // Analyze brightness distribution (works for all colors)
-                  let brightPixels = 0;
-                  let darkPixels = 0;
-                  const brightnessMap = {};
-
-                  for (let i = 0; i < data.length; i += 4) {
-                    const r = data[i];
-                    const g = data[i + 1];
-                    const b = data[i + 2];
-                    const a = data[i + 3];
-
-                    if (a < 180) continue;
-
-                    // Calculate brightness using luminance
-                    const brightness = Math.round((r * 0.299 + g * 0.587 + b * 0.114) / 10);
-                    brightnessMap[brightness] = (brightnessMap[brightness] || 0) + 1;
-
-                    if (brightness > 20) brightPixels++;
-                    else darkPixels++;
-                  }
-
-                  // Find most common brightness level (shirt area)
-                  let dominantBrightness = 0;
-                  let maxBrightnessCount = 0;
-                  for (const [brightness, count] of Object.entries(brightnessMap)) {
-                    if (count > maxBrightnessCount) {
-                      maxBrightnessCount = count;
-                      dominantBrightness = parseInt(brightness);
-                    }
-                  }
-                  console.log(`[Auto-Placement] Dominant brightness: ${dominantBrightness}`);
-
-                  // Refine margins based on shirt type
-                  // Light shirts (white, light green) = narrow margins
-                  // Dark shirts (black, purple) = adjusted margins
-                  let marginX = pw * 0.08;
-                  let marginY = ph * 0.12;
-
-                  if (dominantBrightness < 12) {
-                    // Dark shirt - use tighter margins
-                    marginX = pw * 0.06;
-                    marginY = ph * 0.1;
-                  } else if (dominantBrightness > 18) {
-                    // Light shirt - keep standard margins
-                    marginX = pw * 0.08;
-                    marginY = ph * 0.12;
-                  } else {
-                    // Medium shirt - balanced margins
-                    marginX = pw * 0.07;
-                    marginY = ph * 0.11;
-                  }
-
-                  // Use refined shirt bounds from AI detection + brightness analysis
-                  shirtBounds = {
-                    left: px + marginX,
-                    top: py + marginY,
-                    width: pw - marginX * 2,
-                    height: ph * 0.65 - marginY
-                  };
-                  console.log(`[Auto-Placement] Shirt bounds calculated: x=${shirtBounds.left.toFixed(0)}, y=${shirtBounds.top.toFixed(0)}, w=${shirtBounds.width.toFixed(0)}, h=${shirtBounds.height.toFixed(0)}`);
-                } catch (colorErr) {
-                  console.log(`[Auto-Placement] Color analysis failed, using basic person bounds`);
-                  shirtBounds = {
-                    left: px + pw * 0.1,
-                    top: py + ph * 0.2,
-                    width: pw * 0.8,
-                    height: ph * 0.5
-                  };
-                }
-              }
-
-              // If no person detected, use fallback
-              if (!shirtBounds) {
-                shirtBounds = {
-                  left: mockupW * 0.2,
-                  top: mockupH * 0.2,
-                  width: mockupW * 0.6,
-                  height: mockupH * 0.5
-                };
-              }
-
-              // Calculate optimal design size
-              const shirtAspectRatio = shirtBounds.width / shirtBounds.height;
-              let finalWidth, finalHeight;
-
-              if (designAspectRatio > shirtAspectRatio) {
-                // Design wider - fit to width
-                finalWidth = (shirtBounds.width / mockupW) * 100 * 0.92;
-                finalHeight = (finalWidth * mockupW / 100) / designAspectRatio / mockupH * 100;
-              } else {
-                // Design taller - fit to height
-                finalHeight = (shirtBounds.height / mockupH) * 100 * 0.92;
-                finalWidth = (finalHeight * mockupH / 100) * designAspectRatio / mockupW * 100;
-              }
-
-              // Clamp to max bounds
-              const maxWidth = (shirtBounds.width / mockupW) * 100 * 0.92;
-              const maxHeight = (shirtBounds.height / mockupH) * 100 * 0.92;
-
-              if (finalWidth > maxWidth) {
-                finalWidth = maxWidth;
-                finalHeight = (finalWidth * mockupW / 100) / designAspectRatio / mockupH * 100;
-              }
-              if (finalHeight > maxHeight) {
-                finalHeight = maxHeight;
-                finalWidth = (finalHeight * mockupH / 100) * designAspectRatio / mockupW * 100;
-              }
-
-              // Perfect center in shirt area
-              const designWidthPx = (finalWidth * mockupW / 100);
-              const designHeightPx = (finalHeight * mockupH / 100);
-              const centerX = shirtBounds.left + (shirtBounds.width - designWidthPx) / 2;
-              const centerY = shirtBounds.top + (shirtBounds.height - designHeightPx) / 2;
-
-              const autoPlacement = {
-                left: (centerX / mockupW) * 100,
-                top: (centerY / mockupH) * 100,
-                width: finalWidth,
-                height: finalHeight,
-                opacity: placement.opacity || 100
-              };
-
-              // Always apply auto-placement when calculated
-              // This ensures optimal placement for every mockup
-              if (autoPlacement) {
-                console.log(`[Auto-Placement] Applied: left=${autoPlacement.left.toFixed(1)}%, top=${autoPlacement.top.toFixed(1)}%, w=${autoPlacement.width.toFixed(1)}%, h=${autoPlacement.height.toFixed(1)}%`);
-                onChange(autoPlacement);
-              }
-            } catch (err) {
-              console.error(`[Auto-Placement] Detection failed:`, err.message);
-              // Smart fallback: Use design aspect ratio to calculate reasonable placement
-              console.log(`[Auto-Placement] Applying smart fallback...`);
-
-              const mockupW = mockupImg.width;
-              const mockupH = mockupImg.height;
-              const mockupAspectRatio = mockupW / mockupH;
-
-              // Estimate shirt area based on mockup aspect ratio
-              let shirtEstimate = {
-                left: mockupW * 0.15,
-                top: mockupH * 0.25,
-                width: mockupW * 0.7,
-                height: mockupH * 0.45
-              };
-
-              // Calculate optimal design size based on aspect ratio
-              const shirtAspectRatio = shirtEstimate.width / shirtEstimate.height;
-              let finalWidth, finalHeight;
-
-              if (designAspectRatio > shirtAspectRatio) {
-                // Design wider - fit to width
-                finalWidth = (shirtEstimate.width / mockupW) * 100 * 0.88;
-                finalHeight = (finalWidth * mockupW / 100) / designAspectRatio / mockupH * 100;
-              } else {
-                // Design taller - fit to height
-                finalHeight = (shirtEstimate.height / mockupH) * 100 * 0.88;
-                finalWidth = (finalHeight * mockupH / 100) * designAspectRatio / mockupW * 100;
-              }
-
-              // Center in estimated shirt area
-              const designWidthPx = (finalWidth * mockupW / 100);
-              const designHeightPx = (finalHeight * mockupH / 100);
-              const centerX = shirtEstimate.left + (shirtEstimate.width - designWidthPx) / 2;
-              const centerY = shirtEstimate.top + (shirtEstimate.height - designHeightPx) / 2;
-
-              const fallbackPlacement = {
-                left: (centerX / mockupW) * 100,
-                top: (centerY / mockupH) * 100,
-                width: finalWidth,
-                height: finalHeight,
-                opacity: placement.opacity || 100
-              };
-
-              console.log(`[Auto-Placement] Fallback applied: left=${fallbackPlacement.left.toFixed(1)}%, top=${fallbackPlacement.top.toFixed(1)}%, w=${fallbackPlacement.width.toFixed(1)}%, h=${fallbackPlacement.height.toFixed(1)}%`);
-              onChange(fallbackPlacement);
-            }
-          };
-          mockupImg.onerror = () => {
-            console.error(`[Auto-Placement] Mockup image failed to load`);
-          };
-          mockupImg.src = referenceSrc;
-        };
-        designImg.onerror = () => {
-          console.error(`[Auto-Placement] Design image failed to load`);
-        };
-        designImg.src = designSrc;
-      } catch (err) {
-        console.error(`[Auto-Placement] Outer try-catch error:`, err.message);
-      }
-    };
-
-    detectAndPlace();
-  }, [referenceSrc, designSrc]);
+  const box = useMemo(() => {
+    if (liveBox) return liveBox;
+    if (!resolved) return null;
+    return toBox(resolved.placement, resolved.artwork.visibleAspect, resolved.imageAspect);
+  }, [liveBox, resolved]);
 
   useEffect(() => {
     function onMove(e) {
-      if (!dragRef.current || !containerRef.current) return;
+      const drag = dragRef.current;
+      if (!drag || !containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
-      const dxPct = ((e.clientX - dragRef.current.startX) / rect.width) * 100;
-      const dyPct = ((e.clientY - dragRef.current.startY) / rect.height) * 100;
-      const s = dragRef.current.start;
-      const mode = dragRef.current.mode;
+      const dxPct = ((e.clientX - drag.startX) / rect.width) * 100;
+      const dyPct = ((e.clientY - drag.startY) / rect.height) * 100;
 
-      if (mode === "move") {
-        onChange({ ...s, left: s.left + dxPct, top: s.top + dyPct });
-        return;
-      }
+      const next =
+        drag.mode === "move"
+          ? { ...drag.start, left: drag.start.left + dxPct, top: drag.start.top + dyPct }
+          : resizeBox(drag.start, drag.mode, dxPct, dyPct);
 
-      let next = { ...s };
-      if (mode.includes("e")) next.width = clamp(s.width + dxPct, 6, 150);
-      if (mode.includes("s")) next.height = clamp(s.height + dyPct, 6, 150);
-      if (mode.includes("w")) {
-        next.width = clamp(s.width - dxPct, 6, 150);
-        next.left = s.left + (s.width - next.width);
-      }
-      if (mode.includes("n")) {
-        next.height = clamp(s.height - dyPct, 6, 150);
-        next.top = s.top + (s.height - next.height);
-      }
-      onChange(next);
+      setLiveBox(next);
+      drag.latest = next;
     }
     function onUp() {
+      const drag = dragRef.current;
       dragRef.current = null;
+      // Commit once on release rather than on every pointer move, so a single
+      // drag writes a single lock and a single save.
+      if (drag?.latest) onChange(drag.latest);
     }
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -1365,10 +1266,13 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
   }, [onChange]);
 
   function startDrag(mode, e) {
+    if (!box) return;
     e.preventDefault();
     e.stopPropagation();
-    dragRef.current = { mode, startX: e.clientX, startY: e.clientY, start: { ...placement } };
+    dragRef.current = { mode, startX: e.clientX, startY: e.clientY, start: { ...box }, latest: null };
   }
+
+  const chest = resolved?.chest;
 
   return (
     <div
@@ -1387,35 +1291,44 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
         <TShirtSilhouette color={tshirtColor} />
       )}
 
-      {/* Print Area reference — visual guide for design placement */}
-      <div
-        className="absolute border border-dashed pointer-events-none"
-        style={{
-          left: `${PRINT_AREA.left}%`,
-          top: `${PRINT_AREA.top}%`,
-          width: `${PRINT_AREA.width}%`,
-          height: `${PRINT_AREA.height}%`,
-          borderColor: "rgba(0,0,0,0.35)",
-        }}
-      />
+      {/* The measured printable chest area, not a fixed rectangle. */}
+      {chest && (
+        <div
+          className="absolute border border-dashed pointer-events-none"
+          style={{
+            left: `${(chest.centerX - chest.width / 2) * 100}%`,
+            top: `${(chest.centerY - chest.height / 2) * 100}%`,
+            width: `${chest.width * 100}%`,
+            height: `${chest.height * 100}%`,
+            borderColor: "rgba(0,194,168,0.55)",
+          }}
+        />
+      )}
 
-      {designSrc && (
+      {status === "analyzing" && !resolved && (
+        <div className="absolute inset-0 flex items-center justify-center bg-white/60">
+          <span className="font-body text-xs text-gray-600">Analyzing shirt…</span>
+        </div>
+      )}
+
+      {designSrc && box && (
         <div
           onPointerDown={(e) => startDrag("move", e)}
           className="absolute cursor-move border-2 border-dashed"
           style={{
-            left: `${placement.left}%`,
-            top: `${placement.top}%`,
-            width: `${placement.width}%`,
-            height: `${placement.height}%`,
+            left: `${box.left}%`,
+            top: `${box.top}%`,
+            width: `${box.width}%`,
+            height: `${box.height}%`,
             borderColor: ACCENT.violet,
+            transform: box.rotation ? `rotate(${box.rotation}deg)` : undefined,
           }}
         >
           <img
             src={designSrc}
             alt="design"
             className="w-full h-full object-contain pointer-events-none"
-            style={{ opacity: placement.opacity / 100 }}
+            style={{ opacity: box.opacity / 100 }}
           />
           {HANDLES.map((h) => (
             <div
@@ -1436,7 +1349,53 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
   );
 }
 
-const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockupSrc, designSrc, placement, t }, ref) {
+/** Compact readout of what the pipeline measured and decided. */
+function PlacementReport({ resolved }) {
+  const { report, artwork, placement } = resolved;
+  const tierLabel =
+    report.tier === "locked"
+      ? report.lockKind === "pinned"
+        ? "Locked (calibrated)"
+        : "Locked (measured)"
+      : report.tier === "solved"
+        ? "Measured"
+        : "Fallback";
+  const tierColor =
+    report.tier === "fallback" ? ACCENT.coral : report.tier === "locked" ? ACCENT.teal : ACCENT.violet;
+
+  const failures = report.validation?.failures ?? [];
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-2 space-y-1">
+      <div className="flex items-center gap-1.5">
+        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: tierColor }} />
+        <span className="font-body text-[11px] font-semibold text-gray-800">{tierLabel}</span>
+      </div>
+      <p className="font-mono2 text-[10px] text-gray-500 leading-relaxed">
+        {artwork.orientation} · ratio {artwork.visibleAspect.toFixed(2)}
+        {artwork.paddingRatio > 0.02 && ` · trimmed ${(artwork.paddingRatio * 100).toFixed(0)}% padding`}
+      </p>
+      {report.analysis && (
+        <p className="font-mono2 text-[10px] text-gray-500 leading-relaxed">
+          {report.analysis.pose} · {report.analysis.cameraAngle}
+          {report.analysis.occluded && " · chest partly covered"}
+        </p>
+      )}
+      <p className="font-mono2 text-[10px] text-gray-400">
+        w {(placement.width * 100).toFixed(1)}%
+        {placement.rotation ? ` · ${placement.rotation.toFixed(1)}°` : ""}
+        {placement.perspective ? " · warped" : ""}
+      </p>
+      {failures.length > 0 && (
+        <p className="font-mono2 text-[10px]" style={{ color: ACCENT.coral }}>
+          corrected: {failures.join(", ")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockupSrc, designSrc, resolved, t }, ref) {
   const canvasRef = useRef(null);
   const [hasImage, setHasImage] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -1449,55 +1408,47 @@ const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockup
     }
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    const mockupImg = new Image();
-    mockupImg.crossOrigin = "anonymous";
-    mockupImg.onload = () => {
-      // Canvas her zaman orijinal mockup çözünürlüğünde oluşturulur — küçük gösterim
-      // sadece CSS ile yapılır (w-full h-auto), böylece indirilen dosya kalite kaybetmez.
-      canvas.width = mockupImg.width;
-      canvas.height = mockupImg.height;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(mockupImg, 0, 0, canvas.width, canvas.height);
 
-      if (designSrc) {
-        const designEl = new Image();
-        designEl.onload = () => {
-          const boxX = canvas.width * (placement.left / 100);
-          const boxY = canvas.height * (placement.top / 100);
-          const boxW = canvas.width * (placement.width / 100);
-          const boxH = canvas.height * (placement.height / 100);
+    let cancelled = false;
 
-          // object-contain: kutu içine tasarımın oranını bozmadan sığdır
-          const imgRatio = designEl.width / designEl.height;
-          const boxRatio = boxW / boxH;
-          let dW, dH;
-          if (imgRatio > boxRatio) {
-            dW = boxW;
-            dH = dW / imgRatio;
-          } else {
-            dH = boxH;
-            dW = dH * imgRatio;
-          }
-          const dX = boxX + (boxW - dW) / 2;
-          const dY = boxY + (boxH - dH) / 2;
+    (async () => {
+      try {
+        // Shared cache, so the export reuses the exact bitmap the pipeline
+        // measured — no chance of measuring one decode and rendering another.
+        const mockupImg = await loadImage(mockupSrc);
+        if (cancelled) return;
 
-          ctx.globalAlpha = placement.opacity / 100;
-          ctx.drawImage(designEl, dX, dY, dW, dH);
-          ctx.globalAlpha = 1;
+        // Always composite at full mockup resolution; the on-screen thumbnail
+        // is CSS-scaled, so downloads keep their original quality.
+        canvas.width = mockupImg.naturalWidth || mockupImg.width;
+        canvas.height = mockupImg.naturalHeight || mockupImg.height;
+        const ctx = canvas.getContext("2d");
+
+        if (!designSrc || !resolved) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(mockupImg, 0, 0, canvas.width, canvas.height);
           setHasImage(true);
-        };
-        designEl.src = designSrc;
-      } else {
+          return;
+        }
+
+        const artworkImg = await loadImage(designSrc, false);
+        if (cancelled) return;
+
+        // Render order enforced by the compositor: photo → artwork → fabric
+        // shading over the top.
+        renderMockup(ctx, mockupImg, artworkImg, resolved.artwork, resolved.placement);
         setHasImage(true);
+      } catch {
+        if (cancelled) return;
+        setHasImage(false);
+        setLoadFailed(true);
       }
+    })();
+
+    return () => {
+      cancelled = true;
     };
-    mockupImg.onerror = () => {
-      setHasImage(false);
-      setLoadFailed(true);
-    };
-    mockupImg.src = mockupSrc;
-  }, [mockupSrc, designSrc, placement]);
+  }, [mockupSrc, designSrc, resolved]);
 
   function download() {
     const canvas = canvasRef.current;

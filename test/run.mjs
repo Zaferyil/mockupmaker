@@ -1,0 +1,152 @@
+// Headless verification of the deterministic placement core.
+//   npm run test:placement
+//
+// Starts a vite dev server, drives the harness page in Chromium, and asserts
+// the invariants the placement pipeline is supposed to guarantee.
+import { chromium } from "playwright";
+import { spawn } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
+
+const PORT = process.env.PORT ?? 5178;
+const URL = process.env.HARNESS_URL ?? `http://127.0.0.1:${PORT}/test/harness.html`;
+
+/** Prefer a preinstalled Chromium; fall back to whatever playwright manages. */
+function findChromium() {
+  if (process.env.CHROMIUM_PATH) return process.env.CHROMIUM_PATH;
+  const root = process.env.PLAYWRIGHT_BROWSERS_PATH || "/opt/pw-browsers";
+  if (!existsSync(root)) return undefined;
+  const dir = readdirSync(root)
+    .filter((d) => d.startsWith("chromium-"))
+    .sort()
+    .pop();
+  if (!dir) return undefined;
+  const bin = `${root}/${dir}/chrome-linux/chrome`;
+  return existsSync(bin) ? bin : undefined;
+}
+
+let server = null;
+if (!process.env.HARNESS_URL) {
+  server = spawn("npx", ["vite", "--port", String(PORT), "--host", "127.0.0.1"], {
+    stdio: "ignore",
+    detached: false,
+  });
+  // Wait for the dev server to answer.
+  const deadline = Date.now() + 30000;
+  for (;;) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT}/`);
+      if (res.ok || res.status === 404) break;
+    } catch {
+      /* not up yet */
+    }
+    if (Date.now() > deadline) {
+      server.kill();
+      throw new Error("vite dev server did not start");
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+}
+
+const shutdown = () => {
+  if (server && !server.killed) server.kill("SIGTERM");
+};
+process.on("exit", shutdown);
+
+const browser = await chromium.launch({
+  executablePath: findChromium(),
+  args: ["--no-sandbox", "--use-gl=swiftshader", "--enable-unsafe-swiftshader"],
+});
+const page = await browser.newPage();
+const errors = [];
+page.on("pageerror", (e) => errors.push(e.message));
+page.on("console", (m) => {
+  if (m.type() === "error") errors.push(m.text());
+});
+
+await page.goto(URL, { waitUntil: "load" });
+await page.waitForFunction(() => window.__RESULTS__ !== undefined, null, { timeout: 60000 });
+const r = await page.evaluate(() => window.__RESULTS__);
+await browser.close();
+
+if (errors.length) {
+  console.log("page errors:", errors.slice(0, 5));
+}
+
+let failures = 0;
+const check = (name, pass, detail) => {
+  console.log(`${pass ? "PASS" : "FAIL"}  ${name}${detail ? `  — ${detail}` : ""}`);
+  if (!pass) failures++;
+};
+
+console.log("\n=== deterministic placement core ===\n");
+
+check("determinism: identical input → identical output", r.determinism.identical);
+
+const ci = r.colorInvariance;
+check(
+  "colour invariance: centre within 2% across 6 shirt colours",
+  ci.cxSpread !== null && ci.cxSpread < 0.02 && ci.cySpread < 0.02,
+  `cxSpread=${ci.cxSpread} cySpread=${ci.cySpread} wSpread=${ci.wSpread}`,
+);
+for (const s of ci.samples) if (s.error) console.log(`      ! ${s.shirtColor}: ${s.error}`);
+
+check(
+  "translation: placement tracks a moved garment",
+  Math.abs(r.translation.delta - r.translation.expected) < 0.02,
+  `delta=${r.translation.delta} expected=${r.translation.expected}`,
+);
+
+check(
+  "scale invariance: print scales with garment",
+  Math.abs(r.scale.ratio - r.scale.expected) < 0.08,
+  `ratio=${r.scale.ratio} expected=${r.scale.expected}`,
+);
+
+const p = r.padding;
+check(
+  "transparent padding detected",
+  p.paddedPaddingRatio > 0.3 && p.tightPaddingRatio < 0.05,
+  `tight=${p.tightPaddingRatio} padded=${p.paddedPaddingRatio}`,
+);
+check(
+  "padded and tight artwork render identical ink",
+  Math.abs(p.tightInk.w - p.paddedInk.w) < 1 && Math.abs(p.tightInk.h - p.paddedInk.h) < 1,
+  `tightInk=${JSON.stringify(p.tightInk)} paddedInk=${JSON.stringify(p.paddedInk)}`,
+);
+check(
+  "padded PNG is drawn larger to compensate",
+  p.paddedDrawnCanvas.w > p.tightDrawnCanvas.w * 1.3,
+  `tightCanvas=${p.tightDrawnCanvas.w} paddedCanvas=${p.paddedDrawnCanvas.w}`,
+);
+
+for (const a of r.aspect) {
+  check(
+    `aspect preserved: ${a.name}`,
+    Math.abs(a.renderedAspect - a.sourceAspect) / a.sourceAspect < 0.01,
+    `source=${a.sourceAspect} rendered=${a.renderedAspect}`,
+  );
+}
+const cxs = r.aspect.map((a) => a.cx);
+const cys = r.aspect.map((a) => a.cy);
+check(
+  "different artwork shapes share one centre",
+  Math.max(...cxs) - Math.min(...cxs) < 0.02 && Math.max(...cys) - Math.min(...cys) < 0.02,
+  `cx spread=${(Math.max(...cxs) - Math.min(...cxs)).toFixed(4)} cy spread=${(Math.max(...cys) - Math.min(...cys)).toFixed(4)}`,
+);
+check("all solved placements valid", r.aspect.every((a) => a.valid));
+
+check(
+  "QC repairs an illegal placement",
+  r.qc.brokenValid === false && r.qc.fixedValid === true,
+  `repairs=[${r.qc.repairs.join(",")}] → ${JSON.stringify(r.qc.fixed)}`,
+);
+
+check(
+  "tilt: rotation follows a leaning garment",
+  Math.abs(r.tilt.straight) < 1.5 && Math.abs(r.tilt.leaning) > 2,
+  `straight=${r.tilt.straight}° leaning=${r.tilt.leaning}° pose=${r.tilt.pose}`,
+);
+
+console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}\n`);
+shutdown();
+process.exit(failures === 0 ? 0 : 1);
