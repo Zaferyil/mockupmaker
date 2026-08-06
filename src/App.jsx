@@ -1064,23 +1064,18 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
   const containerRef = useRef(null);
   const dragRef = useRef(null);
   const [refFailed, setRefFailed] = useState(false);
-  const autoPlacedRef = useRef(false);
 
   useEffect(() => {
     setRefFailed(false);
-    // Reset auto-placement flag when switching to a new mockup
-    // This ensures auto-placement runs on each new mockup
-    autoPlacedRef.current = false;
   }, [referenceSrc]);
 
   // Advanced auto-detect: Analyze design + t-shirt color/position
-  // Only runs on first load when placement is default
+  // Always runs when design or mockup changes to ensure perfect placement every time
   useEffect(() => {
     if (!referenceSrc || !designSrc) return;
 
-    // Skip if already auto-placed (prevents re-triggering on color change)
-    const isDefault = JSON.stringify(placement) === JSON.stringify(DEFAULT_PLACEMENT);
-    if (!isDefault || autoPlacedRef.current) return;
+    // Auto-placement always runs when mockup or design changes
+    // This ensures optimal placement for every mockup/design combination
 
     const detectAndPlace = async () => {
       try {
@@ -1242,11 +1237,10 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
                 opacity: placement.opacity || 100
               };
 
-              // Apply only if default placement
-              const isDefault = JSON.stringify(placement) === JSON.stringify(DEFAULT_PLACEMENT);
-              if (isDefault && autoPlacement) {
+              // Always apply auto-placement when calculated
+              // This ensures optimal placement for every mockup
+              if (autoPlacement) {
                 onChange(autoPlacement);
-                autoPlacedRef.current = true; // Mark as auto-placed
               }
             } catch (err) {
               console.log("Advanced detection skipped, using fallback");
