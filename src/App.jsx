@@ -675,30 +675,6 @@ function MockupStudio() {
                   <p className="text-xs font-body text-gray-500 mt-1">PNG recommended</p>
                 </div>
 
-                {/* Selected Mockups Section */}
-                {entries.length > 1 && (
-                  <div>
-                    <p className="text-xs font-mono2 uppercase tracking-wide text-gray-400 mb-2 font-semibold">Selected Mockups</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {entries.map((e) => (
-                        <button
-                          key={e.key}
-                          onClick={() => setActiveEntryKey(e.key)}
-                          className="px-2 py-1 rounded text-xs font-body font-medium border transition"
-                          style={{
-                            borderColor: activeEntryKey === e.key ? ACCENT.violet : "#e5e7eb",
-                            backgroundColor: activeEntryKey === e.key ? ACCENT.violet : "white",
-                            color: activeEntryKey === e.key ? "white" : "#374151",
-                          }}
-                        >
-                          {e.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-
                 {designImg && (
                   <div className="space-y-3">
                     {/* Design Placer */}
