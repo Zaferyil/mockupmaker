@@ -652,30 +652,27 @@ function MockupStudio() {
                 <div>
                   <label className="block cursor-pointer">
                     <div
-                      className="w-full rounded-2xl border-2 border-dashed flex flex-col items-center justify-center py-12 sm:py-16 transition hover:bg-gray-50"
+                      className="w-full rounded-2xl border-2 border-dashed flex flex-col items-center justify-center py-8 sm:py-10 transition hover:bg-gray-50"
                       style={{ borderColor: designImg ? ACCENT.teal : "#d1d5db", backgroundColor: designImg ? "rgba(0, 194, 168, 0.02)" : "transparent" }}
                     >
                       {designImg ? (
                         <div className="flex flex-col items-center">
-                          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-xl bg-gray-100 flex items-center justify-center mb-3 overflow-hidden border-2" style={{ borderColor: ACCENT.teal }}>
+                          <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-gray-100 flex items-center justify-center mb-2 overflow-hidden border-2" style={{ borderColor: ACCENT.teal }}>
                             <img src={designImg} alt="design" className="w-full h-full object-contain" />
                           </div>
-                          <span className="font-display font-semibold text-base sm:text-lg text-gray-900">{t.changeDesign}</span>
+                          <span className="font-body font-medium text-sm text-gray-900">{t.changeDesign}</span>
                         </div>
                       ) : (
                         <div className="flex flex-col items-center">
-                          <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-gray-100 flex items-center justify-center mb-4">
-                            <Upload className="w-8 h-8 sm:w-10 sm:h-10" style={{ color: ACCENT.violet }} />
-                          </div>
-                          <span className="font-display font-semibold text-base sm:text-lg text-gray-900 mb-2">Drag & drop your PNG here</span>
-                          <span className="font-body text-sm text-gray-500 mb-1">or</span>
-                          <span className="font-body font-semibold text-sm" style={{ color: ACCENT.violet }}>Choose File</span>
+                          <Upload className="w-8 h-8 mb-3" style={{ color: ACCENT.violet }} />
+                          <span className="font-body font-medium text-sm text-gray-900 mb-1">Drag & drop your PNG here</span>
+                          <span className="font-body text-xs text-gray-500">or Choose File</span>
                         </div>
                       )}
                     </div>
                     <input type="file" accept="image/png,image/webp" className="hidden" onChange={handleDesignUpload} />
                   </label>
-                  <p className="text-xs font-body text-gray-500 mt-3">PNG with transparent background recommended</p>
+                  <p className="text-xs font-body text-gray-500 mt-2">PNG with transparent background recommended</p>
                 </div>
 
                 {/* Selected Mockups Section */}
