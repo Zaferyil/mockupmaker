@@ -735,15 +735,6 @@ function MockupStudio() {
                           accent={ACCENT.violet}
                         />
                       </div>
-
-                      {/* Info Box */}
-                      <div className="bg-green-50 border border-green-200 rounded p-2 flex items-start gap-2">
-                        <span className="text-sm">✨</span>
-                        <div>
-                          <p className="font-body font-semibold text-xs text-green-900">Auto-placed</p>
-                          <p className="font-body text-xs text-green-700">Adjust transparency only</p>
-                        </div>
-                      </div>
                     </div>
                   </div>
                 )}
