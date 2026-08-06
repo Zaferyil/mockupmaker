@@ -647,79 +647,109 @@ function MockupStudio() {
             {entries.length === 0 ? (
               <p className="text-sm font-body text-gray-400 italic">{t.selectMockupFirst}</p>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-6">
+                {/* Upload Area */}
                 <div>
-                  <label className="flex items-center gap-3 cursor-pointer">
+                  <label className="block cursor-pointer">
                     <div
-                      className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl border-2 border-dashed flex items-center justify-center shrink-0 overflow-hidden bg-gray-50"
-                      style={{ borderColor: designImg ? ACCENT.teal : "#d1d5db" }}
+                      className="w-full rounded-2xl border-2 border-dashed flex flex-col items-center justify-center py-12 sm:py-16 transition hover:bg-gray-50"
+                      style={{ borderColor: designImg ? ACCENT.teal : "#d1d5db", backgroundColor: designImg ? "rgba(0, 194, 168, 0.02)" : "transparent" }}
                     >
                       {designImg ? (
-                        <img src={designImg} alt="design" className="w-full h-full object-contain" />
+                        <div className="flex flex-col items-center">
+                          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-xl bg-gray-100 flex items-center justify-center mb-3 overflow-hidden border-2" style={{ borderColor: ACCENT.teal }}>
+                            <img src={designImg} alt="design" className="w-full h-full object-contain" />
+                          </div>
+                          <span className="font-display font-semibold text-base sm:text-lg text-gray-900">{t.changeDesign}</span>
+                        </div>
                       ) : (
-                        <Upload className="w-5 h-5 text-gray-400" />
+                        <div className="flex flex-col items-center">
+                          <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-gray-100 flex items-center justify-center mb-4">
+                            <Upload className="w-8 h-8 sm:w-10 sm:h-10" style={{ color: ACCENT.violet }} />
+                          </div>
+                          <span className="font-display font-semibold text-base sm:text-lg text-gray-900 mb-2">Drag & drop your PNG here</span>
+                          <span className="font-body text-sm text-gray-500 mb-1">or</span>
+                          <span className="font-body font-semibold text-sm" style={{ color: ACCENT.violet }}>Choose File</span>
+                        </div>
                       )}
-                    </div>
-                    <div>
-                      <span className="font-display font-semibold text-sm text-gray-900 block">
-                        {designImg ? t.changeDesign : t.uploadDesign}
-                      </span>
-                      <span className="font-body text-xs text-gray-400">{t.uploadDesignHint}</span>
                     </div>
                     <input type="file" accept="image/png,image/webp" className="hidden" onChange={handleDesignUpload} />
                   </label>
+                  <p className="text-xs font-body text-gray-500 mt-3">PNG with transparent background recommended</p>
                 </div>
 
-                {designImg && (
+                {/* Selected Mockups Section */}
+                {entries.length > 0 && (
                   <div>
+                    <p className="text-xs font-mono2 uppercase tracking-wider text-gray-400 mb-3 font-semibold">Selected Mockups</p>
                     {entries.length > 1 && (
-                      <div className="mb-2">
-                        <p className="text-[10px] font-mono2 uppercase tracking-wide text-gray-400 mb-1">{t.editingLabel}</p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {entries.map((e) => (
-                            <button
-                              key={e.key}
-                              onClick={() => setActiveEntryKey(e.key)}
-                              className="px-2 py-1 rounded-full text-[11px] font-body font-medium border transition"
-                              style={{
-                                borderColor: activeEntryKey === e.key ? ACCENT.violet : "#e5e7eb",
-                                backgroundColor: activeEntryKey === e.key ? ACCENT.violet : "white",
-                                color: activeEntryKey === e.key ? "white" : "#374151",
-                              }}
-                            >
-                              {e.label}
-                            </button>
-                          ))}
-                        </div>
+                      <div className="flex flex-wrap gap-2">
+                        {entries.map((e) => (
+                          <button
+                            key={e.key}
+                            onClick={() => setActiveEntryKey(e.key)}
+                            className="px-3 py-1.5 rounded-full text-xs font-body font-medium border transition"
+                            style={{
+                              borderColor: activeEntryKey === e.key ? ACCENT.violet : "#e5e7eb",
+                              backgroundColor: activeEntryKey === e.key ? ACCENT.violet : "white",
+                              color: activeEntryKey === e.key ? "white" : "#374151",
+                            }}
+                          >
+                            {e.label}
+                          </button>
+                        ))}
                       </div>
                     )}
-                    <DesignPlacer
-                      designSrc={designImg}
-                      referenceSrc={activeSrc}
-                      tshirtColor="#d4d4d8"
-                      placement={getPlacement(activeEntryKey)}
-                      onChange={(next) => setPlacementFor(activeEntryKey, next)}
-                    />
-                    <p className="text-[11px] font-body text-gray-400 mt-2 flex items-center gap-1">
-                      <Move className="w-3 h-3" /> {t.dragHint}
-                    </p>
-                    {R2_PLACEMENTS_URL && placementsSaveStatus !== "idle" && (
-                      <p
-                        className="text-[11px] font-body mt-1 flex items-center gap-1"
-                        style={{ color: placementsSaveStatus === "error" ? ACCENT.coral : ACCENT.teal }}
-                      >
-                        {placementsSaveStatus === "saving" && t.placementSaving}
-                        {placementsSaveStatus === "saved" && `✓ ${t.placementSaved}`}
-                        {placementsSaveStatus === "error" && t.placementSaveError}
-                      </p>
-                    )}
-                    <div className="mt-3 max-w-xs">
-                      <SliderControl
-                        label={t.opacity}
-                        value={getPlacement(activeEntryKey).opacity}
-                        onChange={(v) => setPlacementFor(activeEntryKey, { ...getPlacement(activeEntryKey), opacity: v })}
-                        accent={ACCENT.teal}
+                  </div>
+                )}
+
+
+                {designImg && (
+                  <div className="space-y-6">
+                    {/* Design Placer */}
+                    <div>
+                      <DesignPlacer
+                        designSrc={designImg}
+                        referenceSrc={activeSrc}
+                        tshirtColor="#d4d4d8"
+                        placement={getPlacement(activeEntryKey)}
+                        onChange={(next) => setPlacementFor(activeEntryKey, next)}
                       />
+                      <p className="text-xs font-body text-gray-500 mt-3 flex items-center gap-2">
+                        <Move className="w-4 h-4" /> Drag to adjust design position
+                      </p>
+                      {R2_PLACEMENTS_URL && placementsSaveStatus !== "idle" && (
+                        <p
+                          className="text-xs font-body mt-2 flex items-center gap-1"
+                          style={{ color: placementsSaveStatus === "error" ? ACCENT.coral : ACCENT.teal }}
+                        >
+                          {placementsSaveStatus === "saving" && "💾 Saving..."}
+                          {placementsSaveStatus === "saved" && `✓ Saved`}
+                          {placementsSaveStatus === "error" && "⚠️ Error saving"}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Design Settings */}
+                    <div className="border-t border-gray-200 pt-6">
+                      <h3 className="text-sm font-display font-semibold text-gray-900 mb-4">Design Settings</h3>
+                      <div className="mb-6">
+                        <SliderControl
+                          label="Design Transparency"
+                          value={getPlacement(activeEntryKey).opacity}
+                          onChange={(v) => setPlacementFor(activeEntryKey, { ...getPlacement(activeEntryKey), opacity: v })}
+                          accent={ACCENT.violet}
+                        />
+                      </div>
+
+                      {/* Info Box */}
+                      <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-start gap-3">
+                        <span className="text-lg">✨</span>
+                        <div>
+                          <p className="font-body font-semibold text-sm text-green-900">We automatically place and adjust your design</p>
+                          <p className="font-body text-xs text-green-700 mt-1">You only control the transparency.</p>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}
