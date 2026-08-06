@@ -702,7 +702,7 @@ function MockupStudio() {
                 {designImg && (
                   <div className="space-y-3">
                     {/* Design Placer */}
-                    <div>
+                    <div className="flex justify-center">
                       <DesignPlacer
                         designSrc={designImg}
                         referenceSrc={activeSrc}
@@ -1046,7 +1046,7 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
   return (
     <div
       ref={containerRef}
-      className="relative w-full max-w-xs aspect-square rounded-lg overflow-hidden bg-gray-100 select-none"
+      className="relative w-full max-w-lg aspect-square rounded-lg overflow-hidden bg-gray-100 select-none mx-auto"
       style={{ touchAction: "none" }}
     >
       {referenceSrc && !refFailed ? (
