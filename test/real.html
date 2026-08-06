@@ -1,0 +1,107 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>real mockup harness</title>
+<style>
+  body { margin:0; background:#fff; font:12px system-ui; }
+  .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; padding:6px; }
+  figure { margin:0; }
+  canvas { width:100%; display:block; border:1px solid #ddd; }
+  figcaption { font:10px/1.4 ui-monospace,monospace; padding:2px; }
+</style>
+<body>
+<div class="grid" id="grid"></div>
+<script type="module">
+import { segmentGarment } from "/src/placement/garmentMask.js";
+import { computeChestArea } from "/src/placement/chestArea.js";
+import { solvePlacement } from "/src/placement/solve.js";
+import { analyzeArtwork } from "/src/placement/artwork.js";
+import { renderMockup } from "/src/placement/compositor.js";
+
+const BASE = "/test/fixtures";
+const FILES = ["Black","Crimson","Crunchberry","Denim","Light Green","Moss",
+               "Navy","Pepper","Violet","Watermelon","White","ivory"];
+const FOLDER = "Comfort Colors-1717";
+
+const load = (src, co=true) => new Promise((res, rej) => {
+  const i = new Image(); if (co) i.crossOrigin = "anonymous";
+  i.onload = () => res(i); i.onerror = () => rej(new Error("load "+src)); i.src = src;
+});
+
+// Artwork roughly matching the customer's real design: near-square with a
+// little transparent margin, strong silhouette so placement is easy to judge.
+function makeArtwork() {
+  const c = document.createElement("canvas");
+  c.width = 1200; c.height = 1000;
+  const g = c.getContext("2d");
+  g.clearRect(0,0,1200,1000);
+  g.fillStyle = "#12d1e0"; g.fillRect(80, 70, 1040, 860);
+  g.fillStyle = "#111";
+  g.fillRect(80, 70, 1040, 40); g.fillRect(80, 890, 1040, 40);
+  g.fillRect(80, 70, 40, 860);  g.fillRect(1080, 70, 40, 860);
+  g.font = "bold 200px system-ui"; g.textAlign="center"; g.textBaseline="middle";
+  g.fillText("ART", 600, 500);
+  return c.toDataURL("image/png");
+}
+
+const artSrc = makeArtwork();
+const artImg = await load(artSrc, false);
+const art = analyzeArtwork(artImg);
+
+const rows = [];
+const grid = document.getElementById("grid");
+
+for (const name of FILES) {
+  const key = `${FOLDER}/${name}.png`;
+  const url = `${BASE}/${encodeURIComponent(name)}.png`;
+  const fig = document.createElement("figure");
+  const cv = document.createElement("canvas");
+  const cap = document.createElement("figcaption");
+  fig.append(cv, cap); grid.append(fig);
+
+  try {
+    const img = await load(url);
+    const garment = segmentGarment(img, null);
+    if (!garment) { cap.textContent = `${name}: SEGMENT FAIL`; rows.push({name, error:"segment"}); continue; }
+    const chest = computeChestArea(garment, art);
+    if (!chest) { cap.textContent = `${name}: CHEST FAIL`; rows.push({name, error:"chest", maskConf:garment.confidence}); continue; }
+
+    const imageAspect = img.naturalWidth / img.naturalHeight;
+    const placement = solvePlacement(chest, art, imageAspect, 100);
+
+    // downscale for the contact sheet
+    const W = 460, H = Math.round(W / imageAspect);
+    cv.width = W; cv.height = H;
+    const ctx = cv.getContext("2d");
+    renderMockup(ctx, img, artImg, art, placement, { shading: true });
+
+    // overlay measured chest area in green
+    ctx.strokeStyle = "rgba(0,200,120,0.95)"; ctx.lineWidth = 2;
+    ctx.strokeRect((chest.centerX-chest.width/2)*W, (chest.centerY-chest.height/2)*H,
+                   chest.width*W, chest.height*H);
+    // landmarks
+    if (chest.landmarks) {
+      const L = chest.landmarks;
+      ctx.strokeStyle = "rgba(255,60,0,0.9)"; ctx.lineWidth = 1.5;
+      for (const y of [L.collarBottom, L.armpit]) {
+        ctx.beginPath(); ctx.moveTo(0, y*H); ctx.lineTo(W, y*H); ctx.stroke();
+      }
+    }
+    cap.textContent = `${name}  cy=${chest.centerY.toFixed(3)} w=${placement.width.toFixed(3)} conf=${chest.confidence.toFixed(2)} ${chest.analysis.pose}/${chest.analysis.cameraAngle}`;
+    rows.push({ name, cx:+placement.centerX.toFixed(3), cy:+placement.centerY.toFixed(3),
+                w:+placement.width.toFixed(3), rot:+placement.rotation.toFixed(1),
+                conf:+chest.confidence.toFixed(2), maskConf:+garment.confidence.toFixed(2),
+                pose:chest.analysis.pose, angle:chest.analysis.cameraAngle,
+                occl:+chest.analysis.occlusionRatio.toFixed(2),
+                collar:+chest.landmarks.collarBottom.toFixed(3),
+                armpit:+chest.landmarks.armpit.toFixed(3),
+                torsoW:+chest.landmarks.torsoWidth.toFixed(3) });
+  } catch (e) {
+    cap.textContent = `${name}: ${e.message}`;
+    rows.push({ name, error: e.message });
+  }
+}
+
+window.__ROWS__ = rows;
+document.title = "done";
+</script>
+</body>

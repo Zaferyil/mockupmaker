@@ -55,7 +55,7 @@ const ACHROMATIC_CHROMA_TOL = 0.012;
  * colour — so a white shirt on cream stays contained, while folds still grow
  * through.
  */
-const EDGE_BLOCK = 0.06;
+const EDGE_BLOCK = 0.17;
 /** A mask covering more of the frame than this has certainly leaked. */
 const LEAK_RATIO = 0.82;
 
@@ -287,14 +287,20 @@ function erode(mask, width, height) {
   return out;
 }
 
-/** Close then open: seals fold gaps and buttons, then drops speckle. */
+/**
+ * Close then open: seals fold gaps, then drops speckle.
+ *
+ * The close is deliberately wide (4 dilations). Real garment photography puts
+ * sharp shadow lines in the fabric — a deep fold on an oversized tee reads as
+ * a hard edge, not a soft ramp — so the grow stage leaves the shirt in
+ * fragments. Without a close wide enough to bridge those seams,
+ * `largestComponent` keeps one fragment and the torso measures half its true
+ * width, which is what produced absurdly small prints.
+ */
 function cleanup(mask, width, height) {
   let m = mask;
-  m = dilate(m, width, height);
-  m = dilate(m, width, height);
-  m = erode(m, width, height);
-  m = erode(m, width, height);
-  m = erode(m, width, height);
+  for (let i = 0; i < 4; i++) m = dilate(m, width, height);
+  for (let i = 0; i < 5; i++) m = erode(m, width, height);
   m = dilate(m, width, height);
   return m;
 }

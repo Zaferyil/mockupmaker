@@ -24,9 +24,12 @@
 
 /** Print band geometry, in multiples of torso width. These are the standard
  *  commercial proportions for an adult front chest print. */
-const COLLAR_DROP = 0.14; // gap between collar bottom and print top
-const MAX_PRINT_HEIGHT = 1.05; // print band height ceiling
-const SIDE_SAFE = 0.06; // keep off the side seams
+const COLLAR_DROP = 0.13; // gap between collar bottom and print top
+const MAX_PRINT_HEIGHT = 0.8; // print band height ceiling
+// Keep well off the side seams. A real chest print spans roughly 11-12in on a
+// 20-22in garment width, i.e. a little over half. Leaving only 6% each side
+// produced prints running seam to seam.
+const SIDE_SAFE = 0.18;
 
 /**
  * @typedef {Object} ChestArea
@@ -151,22 +154,36 @@ export function computeChestArea(garment, artwork) {
   const leftEdges = [];
   const rightEdges = [];
   for (let y = torsoBandStart; y <= torsoBandEnd; y++) {
-    const run = runAtAxis(rows[y], axisX);
+    const row = rows[y];
+    const run = runAtAxis(row, axisX);
     if (!run) continue;
-    torsoWidths.push(run.w);
-    torsoCenters.push({ y, cx: (run.x0 + run.x1) / 2 });
-    leftEdges.push({ y, x: run.x0 });
-    rightEdges.push({ y, x: run.x1 });
+
+    // Below the armpit there are no sleeves, so the garment's true width is
+    // the full silhouette — not just the run through the axis. Deep folds can
+    // still split a row into neighbouring runs; merging any run that touches
+    // the torso recovers the real width instead of measuring one fragment.
+    let x0 = run.x0;
+    let x1 = run.x1;
+    const reach = run.w * 0.55;
+    for (const r of row.runs) {
+      if (r === run) continue;
+      if (r.x1 >= x0 - reach && r.x0 <= x1 + reach) {
+        x0 = Math.min(x0, r.x0);
+        x1 = Math.max(x1, r.x1);
+      }
+    }
+
+    torsoWidths.push(x1 - x0 + 1);
+    torsoCenters.push({ y, cx: (x0 + x1) / 2 });
+    leftEdges.push({ y, x: x0 });
+    rightEdges.push({ y, x: x1 });
   }
   if (torsoWidths.length < 4) return null;
   const torsoWidth = median(torsoWidths);
   if (torsoWidth < 6) return null;
 
   // ---- tilt ----------------------------------------------------------
-  // Least-squares fit of the torso centre line. A leaning or seated model
-  // tilts this line; rotating the artwork to match is what keeps the print
-  // looking applied to the fabric rather than pasted on the photo.
-  const rotation = fitTilt(torsoCenters);
+  const rotation = fitTilt(torsoCenters, torsoWidth);
 
   // ---- print band ----------------------------------------------------
   const printTopY = collarBottomY + COLLAR_DROP * torsoWidth;
@@ -256,10 +273,24 @@ export function computeChestArea(garment, artwork) {
   };
 }
 
-/** Least-squares slope of the torso centre line, in degrees. */
-function fitTilt(centers) {
+/**
+ * Tilt of the torso centre line, in degrees — or 0 when the evidence is weak.
+ *
+ * The centre line is a *noisy* estimator. A hand resting against the hip, a
+ * sleeve hanging wider on one side, or a slightly turned body all shift the
+ * silhouette centre without the print needing to rotate at all. Fitting a line
+ * through that noise produced tilts of up to 18 degrees on models who were
+ * sitting essentially upright, and a wrongly rotated print is far more visible
+ * — and far worse commercially — than a missed real tilt.
+ *
+ * So the fit now has to earn its result: the residual must be small relative to
+ * the torso width, and the magnitude is clamped hard. Anything short of clear
+ * evidence returns exactly 0.
+ */
+function fitTilt(centers, torsoWidth) {
   const n = centers.length;
-  if (n < 4) return 0;
+  if (n < 8) return 0;
+
   let sy = 0;
   let sx = 0;
   let syy = 0;
@@ -272,10 +303,26 @@ function fitTilt(centers) {
   }
   const denom = n * syy - sy * sy;
   if (Math.abs(denom) < 1e-6) return 0;
+
   const slope = (n * sxy - sy * sx) / denom; // dx/dy
+  const intercept = (sx - slope * sy) / n;
+
+  // Residual: how well a straight line actually describes the centre line.
+  let sse = 0;
+  for (const p of centers) {
+    const predicted = slope * p.y + intercept;
+    sse += (p.cx - predicted) ** 2;
+  }
+  const rms = Math.sqrt(sse / n);
+
+  // A wandering centre line means the silhouette is asymmetric, not tilted.
+  if (torsoWidth > 0 && rms / torsoWidth > 0.06) return 0;
+
   const deg = Math.atan(slope) * (180 / Math.PI);
-  // Clamp: a garment tilted more than this is a detection artefact, not a pose.
-  return Math.max(-18, Math.min(18, deg));
+  // Sub-degree tilts are noise; large ones are artefacts. Only a genuine,
+  // moderate lean survives.
+  if (Math.abs(deg) < 1.5) return 0;
+  return Math.max(-7, Math.min(7, deg));
 }
 
 function interpolateCenter(centers, y, fallback) {
