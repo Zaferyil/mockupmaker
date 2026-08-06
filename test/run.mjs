@@ -158,6 +158,17 @@ check(
   `leaning=${r.tilt.leaning}° pose=${r.tilt.pose}`,
 );
 
+check(
+  "shading leaves un-printed pixels untouched (no halo)",
+  r.shadingHalo.maxDiffOutside <= 1,
+  `maxDiff outside print = ${r.shadingHalo.maxDiffOutside}`,
+);
+check(
+  "shading is still applied on the print itself",
+  r.shadingHalo.diffOnPrint > 2,
+  `diff on print = ${r.shadingHalo.diffOnPrint}`,
+);
+
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}\n`);
 shutdown();
 process.exit(failures === 0 ? 0 : 1);

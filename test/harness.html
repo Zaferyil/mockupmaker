@@ -238,6 +238,55 @@ const square = makeArtwork({ w: 800, h: 800 });
   };
 }
 
+// 9. fabric shading must not touch pixels the print does not cover.
+//    A rotated print has a much larger axis-aligned bounding box than its own
+//    area, so shading applied box-wide leaves a visible rectangular halo.
+{
+  const { renderMockup } = await import("/src/placement/compositor.js");
+  const shirt = await load(makeShirt({ shirtColor: "#c0397a" }));
+  const artImg = await load(square);
+  const artA = analyzeArtwork(artImg);
+  const placement = { centerX: 0.5, centerY: 0.42, width: 0.3, rotation: 30,
+                      opacity: 100, perspective: null };
+
+  const draw = (shading) => {
+    const c = document.createElement("canvas");
+    c.width = shirt.width; c.height = shirt.height;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    renderMockup(ctx, shirt, artImg, artA, placement, { shading });
+    return ctx.getImageData(0, 0, c.width, c.height).data;
+  };
+
+  const withShading = draw(true);
+  const without = draw(false);
+
+  // Corner of the rotated print's bounding box — inside the box, outside the
+  // artwork. This is exactly where the halo appeared.
+  const h = (0.3 / artA.visibleAspect) * (shirt.width / shirt.height);
+  const probes = [
+    [0.5 - 0.3 / 2 - 0.01, 0.42 - h / 2 - 0.01],
+    [0.5 + 0.3 / 2 + 0.01, 0.42 - h / 2 - 0.01],
+    [0.5 - 0.3 / 2 - 0.01, 0.42 + h / 2 + 0.01],
+  ];
+  let maxDiff = 0;
+  for (const [fx, fy] of probes) {
+    const px = Math.round(fx * shirt.width);
+    const py = Math.round(fy * shirt.height);
+    const i = (py * shirt.width + px) * 4;
+    for (let k = 0; k < 3; k++) {
+      maxDiff = Math.max(maxDiff, Math.abs(withShading[i + k] - without[i + k]));
+    }
+  }
+
+  // And confirm shading really is being applied *on* the print.
+  const ci = (Math.round(0.42 * shirt.height) * shirt.width + Math.round(0.5 * shirt.width)) * 4;
+  const centerDiff = Math.abs(withShading[ci] - without[ci]) +
+                     Math.abs(withShading[ci + 1] - without[ci + 1]) +
+                     Math.abs(withShading[ci + 2] - without[ci + 2]);
+
+  results.shadingHalo = { maxDiffOutside: maxDiff, diffOnPrint: centerDiff };
+}
+
 window.__RESULTS__ = results;
 document.title = "done";
 </script>

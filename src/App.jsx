@@ -506,8 +506,11 @@ function MockupStudio() {
     const current = resolved[key];
     if (!current) return;
 
+    // Rotation now comes from the box, because the rotate handle writes it
+    // there. Taking it from the previous placement would silently discard
+    // every rotation the user just made.
     const placement = fromBox(
-      { ...box, rotation: current.placement.rotation, opacity: current.placement.opacity },
+      { ...box, rotation: box.rotation ?? current.placement.rotation, opacity: current.placement.opacity },
       "manual",
     );
     placement.perspective = current.placement.perspective;
@@ -520,12 +523,21 @@ function MockupStudio() {
     persistLocks();
   }
 
-  /** Opacity is a render property, not geometry — it never touches the lock. */
-  function setOpacityFor(key, opacity) {
+  /**
+   * Opacity applies to every selected mockup at once.
+   *
+   * It is a property of how the artwork is printed, not of any one photograph,
+   * so a POD listing wants it uniform across the whole colour range — setting
+   * it twelve times to keep a set consistent was busywork. It is also a render
+   * property rather than geometry, so it never touches the template locks.
+   */
+  function setOpacityForAll(opacity) {
     setResolved((prev) => {
-      const cur = prev[key];
-      if (!cur) return prev;
-      return { ...prev, [key]: { ...cur, placement: { ...cur.placement, opacity } } };
+      const next = { ...prev };
+      for (const key of Object.keys(next)) {
+        next[key] = { ...next[key], placement: { ...next[key].placement, opacity } };
+      }
+      return next;
     });
   }
 
@@ -959,9 +971,13 @@ function MockupStudio() {
                       <h3 className="text-xs font-display font-semibold text-gray-900 mb-2">Settings</h3>
                       <div className="mb-3">
                         <SliderControl
-                          label="Transparency"
+                          label={
+                            entries.length > 1
+                              ? `Transparency · all ${entries.length} mockups`
+                              : "Transparency"
+                          }
                           value={activeResolved?.placement.opacity ?? 100}
-                          onChange={(v) => setOpacityFor(activeEntryKey, v)}
+                          onChange={setOpacityForAll}
                           accent={ACCENT.violet}
                         />
                       </div>
@@ -1207,6 +1223,25 @@ const HANDLE_POS = {
 };
 
 /**
+ * Rotation grips, sitting just outside each corner.
+ *
+ * Placing them diagonally outward keeps them clear of the resize squares they
+ * share a corner with, which is the convention every design tool uses — so the
+ * gesture is discoverable without a mode switch or a modifier key.
+ */
+const ROTATE_HANDLES = [
+  { id: "rot-nw", left: "0%", top: "0%", dx: -15, dy: -15 },
+  { id: "rot-ne", left: "100%", top: "0%", dx: 15, dy: -15 },
+  { id: "rot-se", left: "100%", top: "100%", dx: 15, dy: 15 },
+  { id: "rot-sw", left: "0%", top: "100%", dx: -15, dy: 15 },
+];
+
+/** Wrap to (-180, 180] so a full turn reads as 0 rather than 360. */
+function normalizeAngle(deg) {
+  return ((((deg + 180) % 360) + 360) % 360) - 180;
+}
+
+/**
  * Resize preserving aspect ratio.
  *
  * Only the width is ever solved for; the height follows from the artwork's own
@@ -1282,13 +1317,48 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, resolved, status, 
       const drag = dragRef.current;
       if (!drag || !containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
-      const dxPct = ((e.clientX - drag.startX) / rect.width) * 100;
-      const dyPct = ((e.clientY - drag.startY) / rect.height) * 100;
 
-      const next =
-        drag.mode === "move"
-          ? { ...drag.start, left: drag.start.left + dxPct, top: drag.start.top + dyPct }
-          : resizeBox(drag.start, drag.mode, dxPct, dyPct);
+      let next;
+      if (drag.mode === "rotate") {
+        // Angle swept around the box centre since the grip was grabbed.
+        const angle =
+          (Math.atan2(e.clientY - drag.center.y, e.clientX - drag.center.x) * 180) / Math.PI;
+        let rotation = normalizeAngle(drag.startRotation + (angle - drag.startAngle));
+
+        // Shift snaps to 15° steps; otherwise a small dead zone around 0 makes
+        // it easy to get back to perfectly straight, which is where a chest
+        // print almost always belongs.
+        if (e.shiftKey) rotation = Math.round(rotation / 15) * 15;
+        else if (Math.abs(rotation) < 2) rotation = 0;
+
+        next = { ...drag.start, rotation };
+      } else {
+        const dxRaw = e.clientX - drag.startX;
+        const dyRaw = e.clientY - drag.startY;
+
+        if (drag.mode === "move") {
+          next = {
+            ...drag.start,
+            left: drag.start.left + (dxRaw / rect.width) * 100,
+            top: drag.start.top + (dyRaw / rect.height) * 100,
+          };
+        } else {
+          // Resize is defined in the box's own frame. On a rotated box the
+          // pointer delta has to be rotated back by the same angle first, or
+          // dragging a corner pulls in a direction the user did not point.
+          const rad = (-(drag.start.rotation ?? 0) * Math.PI) / 180;
+          const cos = Math.cos(rad);
+          const sin = Math.sin(rad);
+          const localX = dxRaw * cos - dyRaw * sin;
+          const localY = dxRaw * sin + dyRaw * cos;
+          next = resizeBox(
+            drag.start,
+            drag.mode,
+            (localX / rect.width) * 100,
+            (localY / rect.height) * 100,
+          );
+        }
+      }
 
       setLiveBox(next);
       drag.latest = next;
@@ -1313,6 +1383,37 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, resolved, status, 
     e.preventDefault();
     e.stopPropagation();
     dragRef.current = { mode, startX: e.clientX, startY: e.clientY, start: { ...box }, latest: null };
+  }
+
+  function startRotate(e) {
+    if (!box || !containerRef.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = containerRef.current.getBoundingClientRect();
+    // Rotation pivots on the box centre — the same origin the CSS transform and
+    // the canvas compositor both use, so preview and export stay identical.
+    const center = {
+      x: rect.left + ((box.left + box.width / 2) / 100) * rect.width,
+      y: rect.top + ((box.top + box.height / 2) / 100) * rect.height,
+    };
+    dragRef.current = {
+      mode: "rotate",
+      center,
+      startAngle: (Math.atan2(e.clientY - center.y, e.clientX - center.x) * 180) / Math.PI,
+      startRotation: box.rotation ?? 0,
+      start: { ...box },
+      latest: null,
+    };
+  }
+
+  /** Double-click any rotation grip to snap back to straight. */
+  function resetRotation(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!box) return;
+    const next = { ...box, rotation: 0 };
+    setLiveBox(next);
+    onChange(next);
   }
 
   const chest = resolved?.chest;
@@ -1416,6 +1517,46 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, resolved, status, 
               }}
             />
           ))}
+
+          {/* Rotation grips, just outside the corners. Round, teal and
+              offset so they never get confused with the square resize
+              handles they sit beside. */}
+          {ROTATE_HANDLES.map((h) => (
+            <div
+              key={h.id}
+              onPointerDown={startRotate}
+              onDoubleClick={resetRotation}
+              title="Drag to rotate · Shift for 15° steps · double-click to straighten"
+              className="absolute w-4 h-4 rounded-full bg-white border-2 flex items-center justify-center"
+              style={{
+                left: h.left,
+                top: h.top,
+                borderColor: ACCENT.teal,
+                cursor: "grab",
+                transform: `translate(calc(-50% + ${h.dx}px), calc(-50% + ${h.dy}px))`,
+              }}
+            >
+              <span
+                className="block rounded-full"
+                style={{ width: 4, height: 4, backgroundColor: ACCENT.teal }}
+              />
+            </div>
+          ))}
+
+          {/* Live angle readout while rotating. */}
+          {box.rotation ? (
+            <span
+              className="absolute font-mono2 text-[10px] px-1.5 py-0.5 rounded text-white pointer-events-none whitespace-nowrap"
+              style={{
+                left: "50%",
+                top: "100%",
+                transform: "translate(-50%, 10px)",
+                backgroundColor: ACCENT.teal,
+              }}
+            >
+              {box.rotation.toFixed(1)}°
+            </span>
+          ) : null}
         </div>
       )}
     </div>

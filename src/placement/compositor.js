@@ -43,43 +43,76 @@ export function inkRectFor(placement, artwork, canvasWidth, canvasHeight) {
   };
 }
 
+/** Axis-aligned bounds of a rect rotated about its own centre, clamped to the canvas. */
+function rotatedBounds(rect, rotationDeg, canvasWidth, canvasHeight) {
+  let { x, y, w, h } = rect;
+  if (rotationDeg) {
+    const rad = (rotationDeg * Math.PI) / 180;
+    const cos = Math.abs(Math.cos(rad));
+    const sin = Math.abs(Math.sin(rad));
+    const rw = w * cos + h * sin;
+    const rh = w * sin + h * cos;
+    x = x + w / 2 - rw / 2;
+    y = y + h / 2 - rh / 2;
+    w = rw;
+    h = rh;
+  }
+  const x0 = Math.max(0, Math.floor(x));
+  const y0 = Math.max(0, Math.floor(y));
+  const x1 = Math.min(canvasWidth, Math.ceil(x + w));
+  const y1 = Math.min(canvasHeight, Math.ceil(y + h));
+  return { x: x0, y: y0, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0) };
+}
+
 /**
- * Draw the artwork.
+ * Render the artwork onto its own transparent layer.
  *
- * @param {CanvasRenderingContext2D} ctx
- * @param {HTMLImageElement} artworkImage
- * @param {import('./artwork.js').ArtworkAnalysis} artwork
- * @param {import('./contract.js').Placement} placement
+ * Drawing to a separate layer rather than straight onto the photo is what
+ * makes correct shading possible: the layer's alpha channel says exactly which
+ * pixels the print covers, so the fabric's light field can be applied to those
+ * pixels and to nothing else.
+ *
+ * Compositing directly meant the shading pass had only an axis-aligned
+ * rectangle to work from, and it brightened everything inside it — background,
+ * skin, whatever happened to fall in the box. Straight-on prints mostly hid
+ * this because the rectangle hugged the artwork; rotating one enlarges the
+ * rectangle sharply and the halo became obvious.
+ *
+ * @returns {{canvas: HTMLCanvasElement, bounds: {x,y,w,h}, ink: {x,y,w,h}}|null}
  */
-export function drawArtwork(ctx, artworkImage, artwork, placement) {
-  const canvasWidth = ctx.canvas.width;
-  const canvasHeight = ctx.canvas.height;
+function renderArtworkLayer(artworkImage, artwork, placement, canvasWidth, canvasHeight) {
   const ink = inkRectFor(placement, artwork, canvasWidth, canvasHeight);
 
   // The PNG's transparent padding means the full bitmap must be drawn larger
   // than the ink target and offset — otherwise the design lands small and
   // off-centre by half the padding asymmetry.
   const full = canvasRectForInk(artwork, ink);
+  const bounds = rotatedBounds(full, placement.rotation, canvasWidth, canvasHeight);
+  if (bounds.w < 1 || bounds.h < 1) return null;
 
-  ctx.save();
-  ctx.globalAlpha = placement.opacity / 100;
+  const layer = document.createElement("canvas");
+  layer.width = bounds.w;
+  layer.height = bounds.h;
+  const lctx = layer.getContext("2d", { willReadFrequently: true });
 
-  const cx = ink.x + ink.w / 2;
-  const cy = ink.y + ink.h / 2;
+  // Work in full-canvas coordinates, offset into the layer.
+  lctx.translate(-bounds.x, -bounds.y);
+
   if (placement.rotation) {
-    ctx.translate(cx, cy);
-    ctx.rotate((placement.rotation * Math.PI) / 180);
-    ctx.translate(-cx, -cy);
+    const cx = ink.x + ink.w / 2;
+    const cy = ink.y + ink.h / 2;
+    lctx.translate(cx, cy);
+    lctx.rotate((placement.rotation * Math.PI) / 180);
+    lctx.translate(-cx, -cy);
   }
 
   if (placement.perspective) {
-    drawWarped(ctx, artworkImage, full, placement.perspective, canvasWidth, canvasHeight, ink);
+    drawWarped(lctx, artworkImage, full, placement.perspective, canvasWidth, canvasHeight, ink);
   } else {
-    ctx.drawImage(artworkImage, full.x, full.y, full.w, full.h);
+    lctx.drawImage(artworkImage, full.x, full.y, full.w, full.h);
   }
 
-  ctx.restore();
-  return ink;
+  return { canvas: layer, bounds, ink };
 }
 
 /**
@@ -150,51 +183,70 @@ function drawWarped(ctx, image, full, quad, canvasWidth, canvasHeight, ink) {
 const lerp = (a, b, t) => a + (b - a) * t;
 
 /**
- * Transfer the garment's shading onto the artwork that was just drawn.
+ * Transfer the garment's shading onto the printed pixels — and only those.
  *
- * Called with the pristine mockup image so the light field is read from the
- * fabric, not from the composite that already has the print on it.
+ * The light field is read from the pristine photograph, so it describes the
+ * fabric rather than the composite that already carries the print. Each
+ * pixel's correction is then weighted by the artwork layer's alpha, so
+ * uncovered pixels are multiplied by exactly 1 and come through untouched.
+ * That weighting is what removes the rectangular halo that used to surround a
+ * rotated print.
  *
- * @param {CanvasRenderingContext2D} ctx     canvas holding mockup + artwork
- * @param {HTMLImageElement} mockupImage     the untouched photograph
- * @param {{x,y,w,h}} region                 ink rect returned by drawArtwork
+ * @param {CanvasRenderingContext2D} ctx  canvas holding mockup + artwork
+ * @param {HTMLImageElement} mockupImage  the untouched photograph
+ * @param {{canvas: HTMLCanvasElement, bounds: {x,y,w,h}}} layer
  */
-export function applyFabricShading(ctx, mockupImage, region) {
-  const canvasWidth = ctx.canvas.width;
-  const canvasHeight = ctx.canvas.height;
-
-  const x = Math.max(0, Math.floor(region.x));
-  const y = Math.max(0, Math.floor(region.y));
-  const w = Math.min(canvasWidth - x, Math.ceil(region.w));
-  const h = Math.min(canvasHeight - y, Math.ceil(region.h));
+export function applyFabricShading(ctx, mockupImage, layer) {
+  const { bounds } = layer;
+  const { x, y, w, h } = bounds;
   if (w <= 2 || h <= 2) return false;
 
   try {
-    // Light field from the original fabric.
+    // Light field from the original fabric, sampled over the same region.
     const src = document.createElement("canvas");
     src.width = w;
     src.height = h;
     const sctx = src.getContext("2d", { willReadFrequently: true });
-    sctx.drawImage(mockupImage, x, y, w, h, 0, 0, w, h);
-    const shade = sctx.getImageData(0, 0, w, h);
-    const sd = shade.data;
+    sctx.drawImage(
+      mockupImage,
+      (x / ctx.canvas.width) * (mockupImage.naturalWidth || mockupImage.width),
+      (y / ctx.canvas.height) * (mockupImage.naturalHeight || mockupImage.height),
+      (w / ctx.canvas.width) * (mockupImage.naturalWidth || mockupImage.width),
+      (h / ctx.canvas.height) * (mockupImage.naturalHeight || mockupImage.height),
+      0,
+      0,
+      w,
+      h,
+    );
+    const sd = sctx.getImageData(0, 0, w, h).data;
 
+    // Alpha of the print itself.
+    const ad = layer.canvas
+      .getContext("2d", { willReadFrequently: true })
+      .getImageData(0, 0, w, h).data;
+
+    // Mean luminance over the *covered* pixels only — averaging the whole box
+    // would drag the reference toward the background and tint the print.
     let mean = 0;
+    let covered = 0;
     for (let i = 0; i < sd.length; i += 4) {
+      if (ad[i + 3] < 8) continue;
       mean += 0.299 * sd[i] + 0.587 * sd[i + 1] + 0.114 * sd[i + 2];
+      covered++;
     }
-    mean /= sd.length / 4;
+    if (covered < 16) return false;
+    mean /= covered;
     if (mean < 8) return false; // near-black fabric carries no usable shading
 
-    // Composite that came out of drawArtwork.
     const target = ctx.getImageData(x, y, w, h);
     const td = target.data;
 
     for (let i = 0; i < td.length; i += 4) {
+      const alpha = ad[i + 3];
+      if (alpha < 8) continue; // not printed here — leave the photo alone
       const luma = 0.299 * sd[i] + 0.587 * sd[i + 1] + 0.114 * sd[i + 2];
       // Ratio around the mean: >1 where the fabric catches light, <1 in folds.
-      let factor = luma / mean;
-      factor = 1 + (factor - 1) * SHADING_STRENGTH;
+      let factor = 1 + (luma / mean - 1) * SHADING_STRENGTH * (alpha / 255);
       factor = Math.min(1.6, Math.max(0.45, factor));
       td[i] = Math.min(255, td[i] * factor);
       td[i + 1] = Math.min(255, td[i + 1] * factor);
@@ -219,7 +271,14 @@ export function renderMockup(ctx, mockupImage, artworkImage, artwork, placement,
 
   if (!artworkImage || !artwork) return null;
 
-  const ink = drawArtwork(ctx, artworkImage, artwork, placement);
-  if (shading) applyFabricShading(ctx, mockupImage, ink);
-  return ink;
+  const layer = renderArtworkLayer(artworkImage, artwork, placement, canvas.width, canvas.height);
+  if (!layer) return null;
+
+  ctx.save();
+  ctx.globalAlpha = placement.opacity / 100;
+  ctx.drawImage(layer.canvas, layer.bounds.x, layer.bounds.y);
+  ctx.restore();
+
+  if (shading) applyFabricShading(ctx, mockupImage, layer);
+  return layer.ink;
 }
