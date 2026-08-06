@@ -581,14 +581,14 @@ function MockupStudio() {
         </div>
 
         {/* Step 2: Select Mockups */}
-        <div className="mb-8 sm:mb-12">
-          <div className="flex items-start gap-4 mb-4">
-            <div className="flex items-center justify-center w-10 h-10 rounded-full font-display font-bold text-white" style={{ backgroundColor: ACCENT.violet }}>
+        <div className="mb-6">
+          <div className="flex items-start gap-3 mb-3">
+            <div className="flex items-center justify-center w-8 h-8 rounded-full font-display font-bold text-sm text-white" style={{ backgroundColor: ACCENT.violet }}>
               2
             </div>
             <div className="flex-1">
-              <h2 className="font-display font-semibold text-lg sm:text-xl text-gray-900 mb-1">{t.stepMockups} ({selectedKeys.length})</h2>
-              <p className="font-body text-sm text-gray-500">Multi-select the mockups you want to use</p>
+              <h2 className="font-display font-semibold text-base sm:text-lg text-gray-900 mb-0">{t.stepMockups} ({selectedKeys.length})</h2>
+              <p className="font-body text-xs text-gray-500">Multi-select the mockups you want to use</p>
             </div>
             {selectedKeys.length > 0 && (
               <button
@@ -599,7 +599,7 @@ function MockupStudio() {
               </button>
             )}
           </div>
-          <div className="bg-white rounded-2xl border border-gray-200 p-5 sm:p-6">
+          <div className="bg-white rounded-xl border border-gray-200 p-3 sm:p-4">
             {r2Status !== "ready" ? (
               <p className="text-sm font-body text-gray-400 italic">{r2Status === "loading" ? t.r2Loading : t.chooseFolderFirst}</p>
             ) : !currentFolder ? (
@@ -608,16 +608,16 @@ function MockupStudio() {
               <p className="text-sm font-body text-gray-400 italic">{t.folderEmpty}</p>
             ) : (
               <div>
-                <div className="mb-4 flex items-center justify-between gap-2">
-                  <p className="text-sm font-body text-gray-600">{t.selectMockupsHint}</p>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-xs font-body text-gray-600">{t.selectMockupsHint}</p>
                   <button
                     onClick={selectAllInFolder}
-                    className="text-sm font-body font-semibold text-gray-700 px-3 py-1.5 hover:bg-gray-100 rounded-lg transition"
+                    className="text-xs font-body font-semibold text-gray-700 px-2 py-1 hover:bg-gray-100 rounded text-size transition"
                   >
                     Select all
                   </button>
                 </div>
-                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                <div className="grid grid-cols-4 sm:grid-cols-6 gap-1.5">
                   {currentFolder.items.map((item) => (
                     <MockupTile
                       key={item.key}
@@ -633,76 +633,74 @@ function MockupStudio() {
         </div>
 
         {/* Step 3: Upload Design */}
-        <div className="mb-8 sm:mb-12">
-          <div className="flex items-start gap-4 mb-4">
-            <div className="flex items-center justify-center w-10 h-10 rounded-full font-display font-bold text-white" style={{ backgroundColor: ACCENT.violet }}>
+        <div className="mb-6">
+          <div className="flex items-start gap-3 mb-3">
+            <div className="flex items-center justify-center w-8 h-8 rounded-full font-display font-bold text-sm text-white" style={{ backgroundColor: ACCENT.violet }}>
               3
             </div>
             <div className="flex-1">
-              <h2 className="font-display font-semibold text-lg sm:text-xl text-gray-900 mb-1">{t.stepDesign}</h2>
-              <p className="font-body text-sm text-gray-500">Upload your design and adjust placement</p>
+              <h2 className="font-display font-semibold text-base sm:text-lg text-gray-900 mb-0">{t.stepDesign}</h2>
+              <p className="font-body text-xs text-gray-500">Upload your design and adjust placement</p>
             </div>
           </div>
-          <div className="bg-white rounded-2xl border border-gray-200 p-5 sm:p-6">
+          <div className="bg-white rounded-xl border border-gray-200 p-3 sm:p-4">
             {entries.length === 0 ? (
               <p className="text-sm font-body text-gray-400 italic">{t.selectMockupFirst}</p>
             ) : (
-              <div className="space-y-6">
+              <div className="space-y-4">
                 {/* Upload Area */}
                 <div>
                   <label className="block cursor-pointer">
                     <div
-                      className="w-full rounded-2xl border-2 border-dashed flex flex-col items-center justify-center py-8 sm:py-10 transition hover:bg-gray-50"
+                      className="w-full rounded-lg border-2 border-dashed flex flex-col items-center justify-center py-6 sm:py-8 transition hover:bg-gray-50"
                       style={{ borderColor: designImg ? ACCENT.teal : "#d1d5db", backgroundColor: designImg ? "rgba(0, 194, 168, 0.02)" : "transparent" }}
                     >
                       {designImg ? (
                         <div className="flex flex-col items-center">
-                          <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-gray-100 flex items-center justify-center mb-2 overflow-hidden border-2" style={{ borderColor: ACCENT.teal }}>
+                          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-lg bg-gray-100 flex items-center justify-center mb-1 overflow-hidden border" style={{ borderColor: ACCENT.teal }}>
                             <img src={designImg} alt="design" className="w-full h-full object-contain" />
                           </div>
-                          <span className="font-body font-medium text-sm text-gray-900">{t.changeDesign}</span>
+                          <span className="font-body font-medium text-xs text-gray-900">{t.changeDesign}</span>
                         </div>
                       ) : (
                         <div className="flex flex-col items-center">
-                          <Upload className="w-8 h-8 mb-3" style={{ color: ACCENT.violet }} />
-                          <span className="font-body font-medium text-sm text-gray-900 mb-1">Drag & drop your PNG here</span>
+                          <Upload className="w-6 h-6 mb-2" style={{ color: ACCENT.violet }} />
+                          <span className="font-body font-medium text-xs text-gray-900 mb-0.5">Drag & drop PNG</span>
                           <span className="font-body text-xs text-gray-500">or Choose File</span>
                         </div>
                       )}
                     </div>
                     <input type="file" accept="image/png,image/webp" className="hidden" onChange={handleDesignUpload} />
                   </label>
-                  <p className="text-xs font-body text-gray-500 mt-2">PNG with transparent background recommended</p>
+                  <p className="text-xs font-body text-gray-500 mt-1">PNG recommended</p>
                 </div>
 
                 {/* Selected Mockups Section */}
-                {entries.length > 0 && (
+                {entries.length > 1 && (
                   <div>
-                    <p className="text-xs font-mono2 uppercase tracking-wider text-gray-400 mb-3 font-semibold">Selected Mockups</p>
-                    {entries.length > 1 && (
-                      <div className="flex flex-wrap gap-2">
-                        {entries.map((e) => (
-                          <button
-                            key={e.key}
-                            onClick={() => setActiveEntryKey(e.key)}
-                            className="px-3 py-1.5 rounded-full text-xs font-body font-medium border transition"
-                            style={{
-                              borderColor: activeEntryKey === e.key ? ACCENT.violet : "#e5e7eb",
-                              backgroundColor: activeEntryKey === e.key ? ACCENT.violet : "white",
-                              color: activeEntryKey === e.key ? "white" : "#374151",
-                            }}
-                          >
-                            {e.label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                    <p className="text-xs font-mono2 uppercase tracking-wide text-gray-400 mb-2 font-semibold">Selected Mockups</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {entries.map((e) => (
+                        <button
+                          key={e.key}
+                          onClick={() => setActiveEntryKey(e.key)}
+                          className="px-2 py-1 rounded text-xs font-body font-medium border transition"
+                          style={{
+                            borderColor: activeEntryKey === e.key ? ACCENT.violet : "#e5e7eb",
+                            backgroundColor: activeEntryKey === e.key ? ACCENT.violet : "white",
+                            color: activeEntryKey === e.key ? "white" : "#374151",
+                          }}
+                        >
+                          {e.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
 
 
                 {designImg && (
-                  <div className="space-y-6">
+                  <div className="space-y-3">
                     {/* Design Placer */}
                     <div>
                       <DesignPlacer
@@ -712,27 +710,27 @@ function MockupStudio() {
                         placement={getPlacement(activeEntryKey)}
                         onChange={(next) => setPlacementFor(activeEntryKey, next)}
                       />
-                      <p className="text-xs font-body text-gray-500 mt-3 flex items-center gap-2">
-                        <Move className="w-4 h-4" /> Drag to adjust design position
+                      <p className="text-xs font-body text-gray-500 mt-2 flex items-center gap-1">
+                        <Move className="w-3 h-3" /> Drag to adjust
                       </p>
                       {R2_PLACEMENTS_URL && placementsSaveStatus !== "idle" && (
                         <p
-                          className="text-xs font-body mt-2 flex items-center gap-1"
+                          className="text-xs font-body mt-1 flex items-center gap-1"
                           style={{ color: placementsSaveStatus === "error" ? ACCENT.coral : ACCENT.teal }}
                         >
                           {placementsSaveStatus === "saving" && "💾 Saving..."}
                           {placementsSaveStatus === "saved" && `✓ Saved`}
-                          {placementsSaveStatus === "error" && "⚠️ Error saving"}
+                          {placementsSaveStatus === "error" && "⚠️ Error"}
                         </p>
                       )}
                     </div>
 
                     {/* Design Settings */}
-                    <div className="border-t border-gray-200 pt-6">
-                      <h3 className="text-sm font-display font-semibold text-gray-900 mb-4">Design Settings</h3>
-                      <div className="mb-6">
+                    <div className="border-t border-gray-200 pt-3">
+                      <h3 className="text-xs font-display font-semibold text-gray-900 mb-2">Settings</h3>
+                      <div className="mb-3">
                         <SliderControl
-                          label="Design Transparency"
+                          label="Transparency"
                           value={getPlacement(activeEntryKey).opacity}
                           onChange={(v) => setPlacementFor(activeEntryKey, { ...getPlacement(activeEntryKey), opacity: v })}
                           accent={ACCENT.violet}
@@ -740,11 +738,11 @@ function MockupStudio() {
                       </div>
 
                       {/* Info Box */}
-                      <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-start gap-3">
-                        <span className="text-lg">✨</span>
+                      <div className="bg-green-50 border border-green-200 rounded p-2 flex items-start gap-2">
+                        <span className="text-sm">✨</span>
                         <div>
-                          <p className="font-body font-semibold text-sm text-green-900">We automatically place and adjust your design</p>
-                          <p className="font-body text-xs text-green-700 mt-1">You only control the transparency.</p>
+                          <p className="font-body font-semibold text-xs text-green-900">Auto-placed</p>
+                          <p className="font-body text-xs text-green-700">Adjust transparency only</p>
                         </div>
                       </div>
                     </div>
@@ -752,7 +750,7 @@ function MockupStudio() {
                 )}
 
                 {dockKeys.length > 0 && (
-                  <div className="bg-gray-50 rounded-xl p-3">
+                  <div className="bg-gray-50 rounded p-2">
                     <DockContent t={t} dockKeys={dockKeys} />
                   </div>
                 )}
@@ -760,13 +758,13 @@ function MockupStudio() {
                 <button
                   onClick={() => setGenerated(true)}
                   disabled={!designImg || entries.length === 0}
-                  className="w-full font-display font-bold text-white rounded-xl py-4 px-6 flex items-center justify-center gap-2 transition disabled:opacity-50 text-lg"
+                  className="w-full font-display font-bold text-white rounded-lg py-3 px-4 flex items-center justify-center gap-2 transition disabled:opacity-50 text-base"
                   style={{ backgroundColor: ACCENT.violet }}
                 >
-                  <Sparkles className="w-5 h-5" />
-                  Generate Mockups ({entries.length})
+                  <Sparkles className="w-4 h-4" />
+                  Generate ({entries.length})
                 </button>
-                <p className="text-xs font-body text-gray-500 mt-3">Estimated time: ~30-60 sec</p>
+                <p className="text-xs font-body text-gray-500 mt-1">~30-60 sec</p>
               </div>
             )}
           </div>
