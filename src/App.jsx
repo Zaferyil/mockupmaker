@@ -1320,14 +1320,26 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, resolved, status, 
   return (
     <div
       ref={containerRef}
-      className="relative w-full max-w-lg aspect-square rounded-lg overflow-hidden bg-gray-100 select-none mx-auto"
-      style={{ touchAction: "none" }}
+      className="relative w-full max-w-lg rounded-lg overflow-hidden bg-gray-100 select-none mx-auto"
+      style={{
+        touchAction: "none",
+        // The container must match the mockup's own aspect ratio.
+        //
+        // It used to be forced square while the photo was drawn with
+        // object-contain, which letterboxed anything non-square. Placement
+        // percentages are relative to this container, but the exported canvas
+        // treats them as fractions of the *image* — so every letterboxed
+        // mockup exported at a different position than the editor showed.
+        // Matching the ratio makes the image fill the box exactly, and the two
+        // coordinate systems become the same one.
+        aspectRatio: resolved ? String(resolved.imageAspect) : "1",
+      }}
     >
       {referenceSrc && !refFailed ? (
         <img
           src={referenceSrc}
           alt="mockup"
-          className="absolute inset-0 w-full h-full object-contain pointer-events-none"
+          className="absolute inset-0 w-full h-full object-cover pointer-events-none"
           onError={() => setRefFailed(true)}
         />
       ) : (
@@ -1367,11 +1379,29 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, resolved, status, 
             transform: box.rotation ? `rotate(${box.rotation}deg)` : undefined,
           }}
         >
+          {/*
+            The dashed box is the *visible ink* target, matching what the
+            exporter draws. object-contain would fit the whole PNG — padding
+            included — inside that box, so a design carrying 21% transparent
+            margin previewed noticeably smaller and off-centre relative to the
+            export, which scales the ink itself to the box.
+
+            Positioning the bitmap by its trim ratios is the same arithmetic
+            canvasRectForInk performs on the canvas, so preview and export now
+            agree pixel for pixel.
+          */}
           <img
             src={designSrc}
             alt="design"
-            className="w-full h-full object-contain pointer-events-none"
-            style={{ opacity: box.opacity / 100 }}
+            className="absolute pointer-events-none"
+            style={{
+              left: `${(-resolved.artwork.trim.x / resolved.artwork.trim.w) * 100}%`,
+              top: `${(-resolved.artwork.trim.y / resolved.artwork.trim.h) * 100}%`,
+              width: `${(1 / resolved.artwork.trim.w) * 100}%`,
+              height: `${(1 / resolved.artwork.trim.h) * 100}%`,
+              objectFit: "fill",
+              opacity: box.opacity / 100,
+            }}
           />
           {HANDLES.map((h) => (
             <div
