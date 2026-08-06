@@ -1068,6 +1068,9 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
 
   useEffect(() => {
     setRefFailed(false);
+    // Reset auto-placement flag when switching to a new mockup
+    // This ensures auto-placement runs on each new mockup
+    autoPlacedRef.current = false;
   }, [referenceSrc]);
 
   // Advanced auto-detect: Analyze design + t-shirt color/position
