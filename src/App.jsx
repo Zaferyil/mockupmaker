@@ -1072,53 +1072,57 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
                 const person = predictions.find(p => p.class === "person");
 
                 if (person) {
-                  // Step 3: Analyze t-shirt area
+                  // Step 3: Analyze t-shirt area precisely
                   const bbox = person.bbox;
                   const [px, py, pw, ph] = bbox;
                   const mockupW = mockupImg.width;
                   const mockupH = mockupImg.height;
 
-                  // T-shirt area estimation (torso center)
-                  const shirtTop = py + ph * 0.2;
-                  const shirtLeft = px + pw * 0.15;
-                  const shirtWidth = pw * 0.7;
-                  const shirtHeight = ph * 0.5;
+                  // Refined t-shirt area (larger, more realistic)
+                  const shirtTop = py + ph * 0.15;     // Start 15% from top of person
+                  const shirtLeft = px + pw * 0.1;     // Start 10% from left of person
+                  const shirtWidth = pw * 0.8;         // Use 80% of person width
+                  const shirtHeight = ph * 0.7;        // Use 70% of person height
                   const shirtAspectRatio = shirtWidth / shirtHeight;
 
                   // Step 4: Smart sizing logic
-                  // Compare design aspect ratio with shirt area aspect ratio
                   let finalWidth, finalHeight;
 
                   if (designAspectRatio > shirtAspectRatio) {
-                    // Design is wider - fit to width, scale height proportionally
-                    finalWidth = (shirtWidth / mockupW) * 100;
-                    finalHeight = (shirtWidth / designAspectRatio / mockupH) * 100;
+                    // Design is wider - fit to shirt width (95% of available space)
+                    finalWidth = (shirtWidth / mockupW) * 100 * 0.95;
+                    finalHeight = (finalWidth * mockupW / 100) / designAspectRatio / mockupH * 100;
                   } else {
-                    // Design is taller - fit to height, scale width proportionally
-                    finalHeight = (shirtHeight / mockupH) * 100;
-                    finalWidth = (shirtHeight * designAspectRatio / mockupW) * 100;
+                    // Design is taller - fit to shirt height (95% of available space)
+                    finalHeight = (shirtHeight / mockupH) * 100 * 0.95;
+                    finalWidth = (finalHeight * mockupH / 100) * designAspectRatio / mockupW * 100;
                   }
 
-                  // Ensure sizes don't exceed shirt boundaries (with 10% margin)
-                  const maxWidth = (shirtWidth / mockupW) * 100 * 0.9;
-                  const maxHeight = (shirtHeight / mockupH) * 100 * 0.9;
+                  // Ensure sizes stay within shirt boundaries (max 95%)
+                  const maxWidth = (shirtWidth / mockupW) * 100 * 0.95;
+                  const maxHeight = (shirtHeight / mockupH) * 100 * 0.95;
 
                   if (finalWidth > maxWidth) {
                     finalWidth = maxWidth;
-                    finalHeight = maxWidth / designAspectRatio;
+                    finalHeight = (finalWidth * mockupW / 100) / designAspectRatio / mockupH * 100;
                   }
                   if (finalHeight > maxHeight) {
                     finalHeight = maxHeight;
-                    finalWidth = maxHeight * designAspectRatio;
+                    finalWidth = (finalHeight * mockupH / 100) * designAspectRatio / mockupW * 100;
                   }
 
-                  // Center design in shirt area
-                  const offsetX = (shirtWidth - (finalWidth * mockupW / 100)) / 2;
-                  const offsetY = (shirtHeight - (finalHeight * mockupH / 100)) / 2;
+                  // Calculate center position within shirt area
+                  const shirtWidthPx = shirtWidth;
+                  const shirtHeightPx = shirtHeight;
+                  const designWidthPx = (finalWidth * mockupW / 100);
+                  const designHeightPx = (finalHeight * mockupH / 100);
+
+                  const centerX = shirtLeft + (shirtWidthPx - designWidthPx) / 2;
+                  const centerY = shirtTop + (shirtHeightPx - designHeightPx) / 2;
 
                   autoPlacement = {
-                    left: ((shirtLeft + offsetX) / mockupW) * 100,
-                    top: ((shirtTop + offsetY) / mockupH) * 100,
+                    left: (centerX / mockupW) * 100,
+                    top: (centerY / mockupH) * 100,
                     width: finalWidth,
                     height: finalHeight,
                     opacity: placement.opacity || 100
