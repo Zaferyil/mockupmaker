@@ -62,10 +62,10 @@ export function LoginPage({ onLoginSuccess }) {
             👕
           </div>
           <h1 style={{ fontSize: "32px", margin: "0 0 8px 0", color: "white", fontWeight: "700" }}>
-            MockupMaker
+            MockUP Maker
           </h1>
           <p style={{ margin: "0", color: "rgba(255,255,255,0.8)", fontSize: "16px" }}>
-            Professional mockup design tool
+            POD Mockups for Etsy, Amazon & Shopify
           </p>
         </div>
 

@@ -80,8 +80,8 @@ const LANGS = [
 
 const T = {
   tr: {
-    brand: "SeZaLab",
-    title: "Mockup Stüdyosu",
+    brand: "MockUP Maker",
+    title: "Etsy, Amazon & Shopify için POD Mockuplar",
     subtitle: "Klasörünü seç, mockupları işaretle, tasarımını yerleştir — indir",
     stepFolder: "Mockup Klasörü",
     stepMockups: "Mockuplar",
@@ -122,8 +122,8 @@ const T = {
     missingCount: "eksik mockup",
   },
   de: {
-    brand: "SeZaLab",
-    title: "Mockup-Studio",
+    brand: "MockUP Maker",
+    title: "POD Mockups für Etsy, Amazon & Shopify",
     subtitle: "Ordner wählen, Mockups markieren, Design platzieren — herunterladen",
     stepFolder: "Mockup-Ordner",
     stepMockups: "Mockups",
@@ -164,8 +164,8 @@ const T = {
     missingCount: "fehlende Mockups",
   },
   en: {
-    brand: "SeZaLab",
-    title: "Mockup Studio",
+    brand: "MockUP Maker",
+    title: "POD Mockups for Etsy, Amazon & Shopify",
     subtitle: "Pick a folder, tick your mockups, place the design — download",
     stepFolder: "Mockup Folder",
     stepMockups: "Mockups",
@@ -476,8 +476,8 @@ function MockupStudio() {
                 <Shirt className="w-5 h-5 text-white" strokeWidth={2} />
               </div>
               <div>
-                <div className="font-display font-bold text-sm text-gray-900">SEZALAB</div>
-                <div className="font-body text-xs text-gray-500">Mockup Studio</div>
+                <div className="font-display font-bold text-sm text-gray-900">MockUP Maker</div>
+                <div className="font-body text-xs text-gray-500">POD Mockups for Etsy, Amazon & Shopify</div>
               </div>
             </div>
           </div>
