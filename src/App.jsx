@@ -764,10 +764,30 @@ function MockupStudio() {
                         tshirtColor="#d4d4d8"
                         placement={getPlacement(activeEntryKey)}
                         onChange={(next) => setPlacementFor(activeEntryKey, next)}
+                        selectedCount={selectedKeys.length}
+                        onApplyToAll={() => {
+                          const currentPlacement = getPlacement(activeEntryKey);
+                          selectedKeys.forEach(key => {
+                            setPlacementFor(key, currentPlacement);
+                          });
+                        }}
                       />
-                      <p className="text-xs font-body text-gray-500 mt-2 flex items-center gap-1">
-                        <Move className="w-3 h-3" /> Drag to adjust
-                      </p>
+                      <div className="mt-3 flex flex-col gap-2">
+                        <p className="text-xs font-body text-gray-500 flex items-center gap-1">
+                          <Move className="w-3 h-3" /> Drag to adjust
+                        </p>
+                        {selectedKeys.length > 1 && (
+                          <button
+                            onClick={onApplyToAll}
+                            className="px-3 py-2 rounded-lg text-xs font-semibold text-white transition"
+                            style={{ backgroundColor: ACCENT.teal }}
+                            onMouseEnter={(e) => (e.target.style.opacity = "0.9")}
+                            onMouseLeave={(e) => (e.target.style.opacity = "1")}
+                          >
+                            ✓ Apply to all {selectedKeys.length} mockups
+                          </button>
+                        )}
+                      </div>
                       {R2_PLACEMENTS_URL && placementsSaveStatus !== "idle" && (
                         <p
                           className="text-xs font-body mt-1 flex items-center gap-1"
@@ -1036,7 +1056,7 @@ const HANDLE_POS = {
 };
 
 // Fare ile sürükle/boyutlandır — Design & Yerleşim adımındaki canlı önizleme
-function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChange }) {
+function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChange, selectedCount, onApplyToAll }) {
   const containerRef = useRef(null);
   const dragRef = useRef(null);
   const [refFailed, setRefFailed] = useState(false);
