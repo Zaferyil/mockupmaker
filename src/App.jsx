@@ -1084,18 +1084,18 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
                 const bbox = person.bbox;
                 const [px, py, pw, ph] = bbox;
 
-                // Get canvas for color analysis
+                // Get canvas for advanced color analysis
                 const canvas = document.createElement('canvas');
                 canvas.width = mockupW;
                 canvas.height = mockupH;
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(mockupImg, 0, 0);
 
-                // Analyze torso area (where shirt is)
-                const torsoTop = py + ph * 0.1;
-                const torsoLeft = px + pw * 0.1;
-                const torsoRight = px + pw * 0.9;
-                const torsoBottom = py + ph * 0.7;
+                // Analyze central torso area for shirt color
+                const torsoTop = py + ph * 0.15;
+                const torsoLeft = px + pw * 0.25;
+                const torsoRight = px + pw * 0.75;
+                const torsoBottom = py + ph * 0.65;
 
                 const imageData = ctx.getImageData(
                   torsoLeft, torsoTop,
@@ -1104,41 +1104,63 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
                 );
                 const data = imageData.data;
 
-                // Find dominant color (shirt color) in torso area
-                const colorMap = {};
+                // Analyze brightness distribution (works for all colors)
+                let brightPixels = 0;
+                let darkPixels = 0;
+                const brightnessMap = {};
+
                 for (let i = 0; i < data.length; i += 4) {
                   const r = data[i];
                   const g = data[i + 1];
                   const b = data[i + 2];
                   const a = data[i + 3];
 
-                  // Ignore very transparent pixels
-                  if (a < 200) continue;
+                  if (a < 180) continue;
 
-                  // Quantize color (group similar colors)
-                  const key = `${Math.round(r/10)*10},${Math.round(g/10)*10},${Math.round(b/10)*10}`;
-                  colorMap[key] = (colorMap[key] || 0) + 1;
+                  // Calculate brightness using luminance
+                  const brightness = Math.round((r * 0.299 + g * 0.587 + b * 0.114) / 10);
+                  brightnessMap[brightness] = (brightnessMap[brightness] || 0) + 1;
+
+                  if (brightness > 20) brightPixels++;
+                  else darkPixels++;
                 }
 
-                // Find most common color (likely shirt color)
-                let dominantColor = null;
-                let maxCount = 0;
-                for (const [color, count] of Object.entries(colorMap)) {
-                  if (count > maxCount) {
-                    maxCount = count;
-                    dominantColor = color;
+                // Find most common brightness level (shirt area)
+                let dominantBrightness = 0;
+                let maxBrightnessCount = 0;
+                for (const [brightness, count] of Object.entries(brightnessMap)) {
+                  if (count > maxBrightnessCount) {
+                    maxBrightnessCount = count;
+                    dominantBrightness = parseInt(brightness);
                   }
                 }
 
-                // Use refined shirt bounds from AI + color analysis
-                const refinedMarginX = pw * 0.08;
-                const refinedMarginY = ph * 0.12;
+                // Refine margins based on shirt type
+                // Light shirts (white, light green) = narrow margins
+                // Dark shirts (black, purple) = adjusted margins
+                let marginX = pw * 0.08;
+                let marginY = ph * 0.12;
 
+                if (dominantBrightness < 12) {
+                  // Dark shirt - use tighter margins
+                  marginX = pw * 0.06;
+                  marginY = ph * 0.1;
+                } else if (dominantBrightness > 18) {
+                  // Light shirt - keep standard margins
+                  marginX = pw * 0.08;
+                  marginY = ph * 0.12;
+                } else {
+                  // Medium shirt - balanced margins
+                  marginX = pw * 0.07;
+                  marginY = ph * 0.11;
+                }
+
+                // Use refined shirt bounds from AI detection + brightness analysis
                 shirtBounds = {
-                  left: px + refinedMarginX,
-                  top: py + refinedMarginY,
-                  width: pw - refinedMarginX * 2,
-                  height: ph * 0.65 - refinedMarginY
+                  left: px + marginX,
+                  top: py + marginY,
+                  width: pw - marginX * 2,
+                  height: ph * 0.65 - marginY
                 };
               }
 
