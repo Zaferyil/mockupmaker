@@ -1187,13 +1187,24 @@ function SliderControl({ label, value, onChange, accent, min = 0, max = 100 }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        {/* At 10px, 400 vs 600 in a monospace face is nearly invisible, so the
-            earlier semibold change read as no change at all. 700 (now included
-            in the font import) at 11px is a difference you can actually see. */}
-        <span className="text-[11px] font-mono2 font-bold uppercase tracking-wide text-gray-700">
+        {/* Weight is set inline rather than through a utility class.
+            Tailwind's font-bold resolves through --font-weight-bold, and a
+            monospace face at 10-11px makes even a correct 400→700 step hard to
+            perceive — two rounds of "it didn't change". A direct declaration
+            removes the indirection, and 800 with a darker colour is a step
+            nobody has to squint at. */}
+        <span
+          className="font-mono2 uppercase tracking-wide"
+          style={{ fontSize: "12px", fontWeight: 800, color: "#111827" }}
+        >
           {label}
         </span>
-        <span className="text-[11px] font-mono2 font-bold text-gray-600">{value}%</span>
+        <span
+          className="font-mono2"
+          style={{ fontSize: "12px", fontWeight: 800, color: "#374151" }}
+        >
+          {value}%
+        </span>
       </div>
       <input
         type="range"
