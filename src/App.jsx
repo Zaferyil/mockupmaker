@@ -481,9 +481,43 @@ function MockupStudio() {
               </div>
             </div>
           </div>
-          <button className="p-2 hover:bg-gray-100 rounded-lg">
-            <span className="text-xl">👤</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Language Selector */}
+            <div className="relative">
+              <button
+                onClick={() => setLangOpen(!langOpen)}
+                className="p-2 hover:bg-gray-100 rounded-lg flex items-center gap-1"
+              >
+                <Globe className="w-4 h-4 text-gray-600" />
+                <span className="text-xs font-semibold text-gray-600">{lang.toUpperCase()}</span>
+              </button>
+              {langOpen && (
+                <div className="absolute right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-md z-50">
+                  {[
+                    { id: "de", label: "DE" },
+                    { id: "en", label: "EN" },
+                    { id: "tr", label: "TR" },
+                  ].map((l) => (
+                    <button
+                      key={l.id}
+                      onClick={() => {
+                        setLang(l.id);
+                        setLangOpen(false);
+                      }}
+                      className={`block w-full text-left px-4 py-2 text-sm font-body hover:bg-gray-50 first:rounded-t-lg last:rounded-b-lg ${
+                        lang === l.id ? "bg-gray-100 font-semibold text-gray-900" : "text-gray-700"
+                      }`}
+                    >
+                      {l.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button className="p-2 hover:bg-gray-100 rounded-lg">
+              <span className="text-xl">👤</span>
+            </button>
+          </div>
         </div>
       </div>
 
