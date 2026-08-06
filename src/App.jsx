@@ -700,9 +700,7 @@ function MockupStudio() {
 
                 {/* Selected Mockups Section */}
                 {entries.length > 1 && (
-                  <div>
-                    <p className="text-xs font-mono2 uppercase tracking-wide text-gray-400 mb-2 font-semibold">Selected Mockups</p>
-                    <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap gap-1.5">
                       {entries.map((e) => (
                         <button
                           key={e.key}
@@ -718,9 +716,7 @@ function MockupStudio() {
                         </button>
                       ))}
                     </div>
-                  </div>
                 )}
-
 
                 {designImg && (
                   <div className="space-y-3">
