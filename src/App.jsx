@@ -1045,73 +1045,117 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, placement, onChang
     setRefFailed(false);
   }, [referenceSrc]);
 
-  // Auto-detect optimal placement from mockup image
+  // Auto-detect optimal placement by analyzing both design and mockup
   useEffect(() => {
     if (!referenceSrc || !designSrc) return;
 
     const detectAndPlace = async () => {
       try {
-        // Load image
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.onload = async () => {
+        // Step 1: Analyze design dimensions
+        const designImg = new Image();
+        designImg.onload = async () => {
+          const designWidth = designImg.width;
+          const designHeight = designImg.height;
+          const designAspectRatio = designWidth / designHeight;
+
           try {
-            // Load COCO-SSD model and detect
-            const model = await cocoSsd.load();
-            const predictions = await model.estimateObjects(img);
+            // Step 2: Analyze mockup and detect t-shirt
+            const mockupImg = new Image();
+            mockupImg.crossOrigin = "anonymous";
+            mockupImg.onload = async () => {
+              try {
+                // Load COCO-SSD model and detect person
+                const model = await cocoSsd.load();
+                const predictions = await model.estimateObjects(mockupImg);
 
-            // Look for person/shirt (center of torso area)
-            let autoPlacement = null;
+                let autoPlacement = null;
+                const person = predictions.find(p => p.class === "person");
 
-            // Find person prediction
-            const person = predictions.find(p => p.class === "person");
-            if (person) {
-              // Use center area of person's torso for shirt placement
-              const bbox = person.bbox;
-              const [x, y, w, h] = bbox;
+                if (person) {
+                  // Step 3: Analyze t-shirt area
+                  const bbox = person.bbox;
+                  const [px, py, pw, ph] = bbox;
+                  const mockupW = mockupImg.width;
+                  const mockupH = mockupImg.height;
 
-              // Convert to percentage (image coordinates to placement %)
-              const imgW = img.width;
-              const imgH = img.height;
+                  // T-shirt area estimation (torso center)
+                  const shirtTop = py + ph * 0.2;
+                  const shirtLeft = px + pw * 0.15;
+                  const shirtWidth = pw * 0.7;
+                  const shirtHeight = ph * 0.5;
+                  const shirtAspectRatio = shirtWidth / shirtHeight;
 
-              // Estimate shirt area (roughly 30-50% of person's torso)
-              const shirtTop = y + h * 0.2;
-              const shirtLeft = x + w * 0.15;
-              const shirtWidth = w * 0.7;
-              const shirtHeight = h * 0.5;
+                  // Step 4: Smart sizing logic
+                  // Compare design aspect ratio with shirt area aspect ratio
+                  let finalWidth, finalHeight;
 
-              autoPlacement = {
-                left: (shirtLeft / imgW) * 100,
-                top: (shirtTop / imgH) * 100,
-                width: (shirtWidth / imgW) * 100,
-                height: (shirtHeight / imgH) * 100,
-                opacity: placement.opacity || 100
-              };
-            }
+                  if (designAspectRatio > shirtAspectRatio) {
+                    // Design is wider - fit to width, scale height proportionally
+                    finalWidth = (shirtWidth / mockupW) * 100;
+                    finalHeight = (shirtWidth / designAspectRatio / mockupH) * 100;
+                  } else {
+                    // Design is taller - fit to height, scale width proportionally
+                    finalHeight = (shirtHeight / mockupH) * 100;
+                    finalWidth = (shirtHeight * designAspectRatio / mockupW) * 100;
+                  }
 
-            // Fallback to smart defaults if no person detected
-            if (!autoPlacement) {
-              autoPlacement = {
-                left: 10,
-                top: 25,
-                width: 80,
-                height: 50,
-                opacity: placement.opacity || 100
-              };
-            }
+                  // Ensure sizes don't exceed shirt boundaries (with 10% margin)
+                  const maxWidth = (shirtWidth / mockupW) * 100 * 0.9;
+                  const maxHeight = (shirtHeight / mockupH) * 100 * 0.9;
 
-            // Only apply if placement is still default (user hasn't customized)
-            const isDefault = JSON.stringify(placement) === JSON.stringify(DEFAULT_PLACEMENT);
-            if (isDefault && autoPlacement) {
-              onChange(autoPlacement);
-            }
+                  if (finalWidth > maxWidth) {
+                    finalWidth = maxWidth;
+                    finalHeight = maxWidth / designAspectRatio;
+                  }
+                  if (finalHeight > maxHeight) {
+                    finalHeight = maxHeight;
+                    finalWidth = maxHeight * designAspectRatio;
+                  }
+
+                  // Center design in shirt area
+                  const offsetX = (shirtWidth - (finalWidth * mockupW / 100)) / 2;
+                  const offsetY = (shirtHeight - (finalHeight * mockupH / 100)) / 2;
+
+                  autoPlacement = {
+                    left: ((shirtLeft + offsetX) / mockupW) * 100,
+                    top: ((shirtTop + offsetY) / mockupH) * 100,
+                    width: finalWidth,
+                    height: finalHeight,
+                    opacity: placement.opacity || 100
+                  };
+                }
+
+                // Fallback to smart defaults if detection fails
+                if (!autoPlacement) {
+                  const defaultWidth = 60;
+                  const defaultHeight = defaultWidth / designAspectRatio;
+
+                  autoPlacement = {
+                    left: 20,
+                    top: 25,
+                    width: defaultWidth,
+                    height: Math.min(defaultHeight, 60),
+                    opacity: placement.opacity || 100
+                  };
+                }
+
+                // Only apply if placement is still default (user hasn't customized)
+                const isDefault = JSON.stringify(placement) === JSON.stringify(DEFAULT_PLACEMENT);
+                if (isDefault && autoPlacement) {
+                  onChange(autoPlacement);
+                }
+              } catch (err) {
+                console.log("Auto-detection skipped");
+              }
+            };
+            mockupImg.src = referenceSrc;
           } catch (err) {
-            console.log("Auto-detection skipped, using default placement");
+            console.log("Mockup analysis failed");
           }
         };
-        img.src = referenceSrc;
+        designImg.src = designSrc;
       } catch (err) {
-        console.log("Image analysis failed, using default placement");
+        console.log("Design analysis failed");
       }
     };
 
