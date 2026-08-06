@@ -446,7 +446,7 @@ function MockupStudio() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-24 sm:pb-8">
+    <div className="min-h-screen bg-white pb-20 sm:pb-8">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap');
         .font-display { font-family: 'Space Grotesk', sans-serif; }
@@ -454,79 +454,78 @@ function MockupStudio() {
         .font-mono2 { font-family: 'JetBrains Mono', monospace; }
       `}</style>
 
-      {/* Hero */}
-      <div
-        className="relative overflow-hidden px-4 pt-5 pb-8 sm:px-10 sm:pt-12 sm:pb-14"
-        style={{ background: `linear-gradient(120deg, ${ACCENT.violet} 0%, ${ACCENT.coral} 100%)` }}
-      >
-        <div className="max-w-3xl mx-auto flex items-start justify-between">
-          <div>
-            <div className="flex items-center gap-2 mb-1.5 sm:mb-3">
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ backgroundColor: "rgba(255,255,255,0.2)" }}>
+      {/* Header */}
+      <div className="sticky top-0 z-40 bg-white border-b border-gray-100">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button className="p-2 hover:bg-gray-100 rounded-lg">
+              <span className="text-xl">☰</span>
+            </button>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: ACCENT.violet }}>
                 <Shirt className="w-5 h-5 text-white" strokeWidth={2} />
               </div>
-              <span className="font-display font-semibold text-white/90 tracking-wide text-sm uppercase">{t.brand}</span>
-            </div>
-            <h1 className="font-display font-bold text-2xl sm:text-4xl text-white leading-tight">{t.title}</h1>
-            <p className="hidden sm:block font-body text-white/80 text-base mt-2 max-w-md">{t.subtitle}</p>
-          </div>
-
-          <div className="relative shrink-0">
-            <button
-              onClick={() => setLangOpen((o) => !o)}
-              className="flex items-center gap-1.5 rounded-full px-3 py-2 font-mono2 text-xs font-medium text-white"
-              style={{ backgroundColor: "rgba(255,255,255,0.2)" }}
-            >
-              <Globe className="w-3.5 h-3.5" />
-              {lang.toUpperCase()}
-            </button>
-            {langOpen && (
-              <div className="absolute right-0 mt-2 bg-white rounded-xl shadow-lg overflow-hidden z-20 w-24">
-                {LANGS.map((l) => (
-                  <button
-                    key={l.id}
-                    onClick={() => { setLang(l.id); setLangOpen(false); }}
-                    className={`block w-full text-left px-3 py-2 text-sm font-mono2 hover:bg-gray-100 ${
-                      lang === l.id ? "font-semibold text-gray-900" : "text-gray-500"
-                    }`}
-                  >
-                    {l.label}
-                  </button>
-                ))}
+              <div>
+                <div className="font-display font-bold text-sm text-gray-900">SEZALAB</div>
+                <div className="font-body text-xs text-gray-500">Mockup Studio</div>
               </div>
-            )}
+            </div>
           </div>
-        </div>
-
-        <div className="absolute -bottom-6 right-6 flex gap-2 opacity-70">
-          {Object.values(ACCENT).map((c, i) => (
-            <div key={i} className="w-3 h-3 rounded-full" style={{ backgroundColor: c }} />
-          ))}
+          <button className="p-2 hover:bg-gray-100 rounded-lg">
+            <span className="text-xl">👤</span>
+          </button>
         </div>
       </div>
 
-      {/* İçerik */}
-      <div className="relative z-10 max-w-3xl mx-auto px-3 sm:px-10 -mt-5">
-        {/* Adım 1: Klasör seçimi */}
-        <div className="mb-4">
-          <SectionCard accent={ACCENT.yellow} label={t.stepFolder}>
-            {r2Status === "unconfigured" ? (
-              <p className="text-xs font-body rounded-lg px-3 py-2" style={{ backgroundColor: "#F3F0FF", color: ACCENT.violet }}>
-                {t.r2NotConfigured}
+      {/* Hero Banner */}
+      <div
+        className="relative overflow-hidden px-4 sm:px-6 py-8 sm:py-12"
+        style={{ background: `linear-gradient(135deg, ${ACCENT.violet} 0%, ${ACCENT.coral} 100%)` }}
+      >
+        <div className="max-w-6xl mx-auto">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6 sm:gap-8">
+            <div className="flex-1">
+              <h1 className="font-display font-bold text-3xl sm:text-4xl text-white leading-tight mb-3">
+                Create stunning mockups in seconds ✨
+              </h1>
+              <p className="font-body text-white/90 text-base leading-relaxed">
+                Choose mockups, upload your design and we'll do the magic.
               </p>
+            </div>
+            <div className="w-32 h-32 sm:w-40 sm:h-40 rounded-2xl bg-white/10 flex items-center justify-center flex-shrink-0">
+              <Shirt className="w-16 h-16 sm:w-20 sm:h-20 text-white opacity-80" strokeWidth={1.5} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
+        {/* Step 1: Choose Folder */}
+        <div className="mb-8 sm:mb-12">
+          <div className="flex items-start gap-4 mb-4">
+            <div className="flex items-center justify-center w-10 h-10 rounded-full font-display font-bold text-white" style={{ backgroundColor: ACCENT.violet }}>
+              1
+            </div>
+            <div className="flex-1">
+              <h2 className="font-display font-semibold text-lg sm:text-xl text-gray-900 mb-1">{t.stepFolder}</h2>
+              <p className="font-body text-sm text-gray-500">Choose the folder containing your mockups</p>
+            </div>
+          </div>
+          <div className="bg-white rounded-2xl border border-gray-200 p-5 sm:p-6">
+            {r2Status === "unconfigured" ? (
+              <p className="text-sm font-body text-gray-600 italic">{t.r2NotConfigured}</p>
             ) : r2Status === "loading" ? (
               <p className="text-sm font-body text-gray-400 italic">{t.r2Loading}</p>
             ) : r2Status === "error" ? (
-              <p className="text-xs font-body rounded-lg px-2.5 py-1.5 inline-block" style={{ backgroundColor: "#FFF4EE", color: ACCENT.coral }}>
-                {t.r2ListError}
-              </p>
+              <p className="text-sm font-body text-coral italic">{t.r2ListError}</p>
             ) : folders.length === 0 ? (
               <p className="text-sm font-body text-gray-400 italic">{t.noFoldersYet}</p>
             ) : (
               <div className="relative">
                 <button
                   onClick={() => setFolderOpen((o) => !o)}
-                  className="w-full flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-left hover:border-gray-300 transition"
+                  className="w-full flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-left hover:bg-gray-100 transition font-body"
                 >
                   <span className="flex items-center gap-2.5 min-w-0">
                     <Folder className="w-4 h-4 shrink-0" style={{ color: ACCENT.yellow }} />
@@ -576,15 +575,31 @@ function MockupStudio() {
                   </>
                 )}
 
-                <p className="text-[11px] font-body text-gray-400 mt-2">{t.folderHint}</p>
               </div>
             )}
-          </SectionCard>
+          </div>
         </div>
 
-        {/* Adım 2: Mockup seçimi */}
-        <div className="mb-4">
-          <SectionCard accent={ACCENT.coral} label={t.stepMockups}>
+        {/* Step 2: Select Mockups */}
+        <div className="mb-8 sm:mb-12">
+          <div className="flex items-start gap-4 mb-4">
+            <div className="flex items-center justify-center w-10 h-10 rounded-full font-display font-bold text-white" style={{ backgroundColor: ACCENT.violet }}>
+              2
+            </div>
+            <div className="flex-1">
+              <h2 className="font-display font-semibold text-lg sm:text-xl text-gray-900 mb-1">{t.stepMockups} ({selectedKeys.length})</h2>
+              <p className="font-body text-sm text-gray-500">Multi-select the mockups you want to use</p>
+            </div>
+            {selectedKeys.length > 0 && (
+              <button
+                onClick={clearSelection}
+                className="text-xs font-body font-semibold text-gray-600 hover:text-gray-900 transition"
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+          <div className="bg-white rounded-2xl border border-gray-200 p-5 sm:p-6">
             {r2Status !== "ready" ? (
               <p className="text-sm font-body text-gray-400 italic">{r2Status === "loading" ? t.r2Loading : t.chooseFolderFirst}</p>
             ) : !currentFolder ? (
@@ -593,31 +608,16 @@ function MockupStudio() {
               <p className="text-sm font-body text-gray-400 italic">{t.folderEmpty}</p>
             ) : (
               <div>
-                <div className="flex items-center justify-between flex-wrap gap-2 mb-2.5">
-                  <p className="text-xs font-body text-gray-400">{t.selectMockupsHint}</p>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {selectedKeys.length > 0 && (
-                      <span className="font-mono2 text-[10px] px-2 py-1 rounded-full" style={{ backgroundColor: "#F3F0FF", color: ACCENT.violet }}>
-                        {selectedKeys.length} {t.selectedWord}
-                      </span>
-                    )}
-                    <button
-                      onClick={selectAllInFolder}
-                      className="text-[11px] font-body font-semibold rounded-full px-2.5 py-1 border border-gray-200 text-gray-600 hover:border-gray-300 transition"
-                    >
-                      {t.selectAll}
-                    </button>
-                    {selectedKeys.length > 0 && (
-                      <button
-                        onClick={clearSelection}
-                        className="text-[11px] font-body font-semibold rounded-full px-2.5 py-1 border border-gray-200 text-gray-600 hover:border-gray-300 transition"
-                      >
-                        {t.clearSelection}
-                      </button>
-                    )}
-                  </div>
+                <div className="mb-4 flex items-center justify-between gap-2">
+                  <p className="text-sm font-body text-gray-600">{t.selectMockupsHint}</p>
+                  <button
+                    onClick={selectAllInFolder}
+                    className="text-sm font-body font-semibold text-gray-700 px-3 py-1.5 hover:bg-gray-100 rounded-lg transition"
+                  >
+                    Select all
+                  </button>
                 </div>
-                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {currentFolder.items.map((item) => (
                     <MockupTile
                       key={item.key}
@@ -629,12 +629,21 @@ function MockupStudio() {
                 </div>
               </div>
             )}
-          </SectionCard>
+          </div>
         </div>
 
-        {/* Adım 3: Tasarım & Yerleşim */}
-        <div className="mb-4">
-          <SectionCard accent="#1a1a1a" label={t.stepDesign}>
+        {/* Step 3: Upload Design */}
+        <div className="mb-8 sm:mb-12">
+          <div className="flex items-start gap-4 mb-4">
+            <div className="flex items-center justify-center w-10 h-10 rounded-full font-display font-bold text-white" style={{ backgroundColor: ACCENT.violet }}>
+              3
+            </div>
+            <div className="flex-1">
+              <h2 className="font-display font-semibold text-lg sm:text-xl text-gray-900 mb-1">{t.stepDesign}</h2>
+              <p className="font-body text-sm text-gray-500">Upload your design and adjust placement</p>
+            </div>
+          </div>
+          <div className="bg-white rounded-2xl border border-gray-200 p-5 sm:p-6">
             {entries.length === 0 ? (
               <p className="text-sm font-body text-gray-400 italic">{t.selectMockupFirst}</p>
             ) : (
@@ -724,21 +733,31 @@ function MockupStudio() {
                 <button
                   onClick={() => setGenerated(true)}
                   disabled={!designImg || entries.length === 0}
-                  className="w-full font-display font-semibold text-white rounded-xl py-3.5 flex items-center justify-center gap-2 transition disabled:opacity-40"
+                  className="w-full font-display font-bold text-white rounded-xl py-4 px-6 flex items-center justify-center gap-2 transition disabled:opacity-50 text-lg"
                   style={{ backgroundColor: ACCENT.violet }}
                 >
-                  <Sparkles className="w-4 h-4" />
-                  {t.generateMockups} ({entries.length})
+                  <Sparkles className="w-5 h-5" />
+                  Generate Mockups ({entries.length})
                 </button>
+                <p className="text-xs font-body text-gray-500 mt-3">Estimated time: ~30-60 sec</p>
               </div>
             )}
-          </SectionCard>
+          </div>
         </div>
 
-        {/* Results */}
+        {/* Step 4: Results & Download */}
         {generated && entries.length > 0 && (
-          <div className="mb-8">
-            <SectionCard accent={ACCENT.teal} label={t.results}>
+          <div className="mb-8 sm:mb-12">
+            <div className="flex items-start gap-4 mb-4">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full font-display font-bold text-white" style={{ backgroundColor: ACCENT.violet }}>
+                ✓
+              </div>
+              <div className="flex-1">
+                <h2 className="font-display font-semibold text-lg sm:text-xl text-gray-900 mb-1">{t.results}</h2>
+                <p className="font-body text-sm text-gray-500">Your mockups are ready to download</p>
+              </div>
+            </div>
+            <div className="bg-white rounded-2xl border border-gray-200 p-5 sm:p-6">
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <div>
                   {missingCount > 0 && (
@@ -779,40 +798,34 @@ function MockupStudio() {
                   />
                 ))}
               </div>
-            </SectionCard>
+            </div>
           </div>
         )}
       </div>
 
-      {/* Mobil sabit alt fiş */}
-      <div className="sm:hidden fixed bottom-0 inset-x-0 z-30">
-        {sheetOpen && <div className="fixed inset-0 bg-black/30" onClick={() => setSheetOpen(false)} />}
-        <div className={`relative bg-white rounded-t-2xl shadow-[0_-4px_20px_rgba(0,0,0,0.08)] transition-all ${sheetOpen ? "max-h-[70vh]" : "max-h-24"} overflow-hidden`}>
-          <div className="flex items-center">
-          <button onClick={() => setSheetOpen((o) => !o)} className="flex-1 flex items-center justify-between pl-4 pr-2 py-3.5">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: dockKeys.length ? ACCENT.teal : "#d1d5db" }} />
-              <span className="font-display font-semibold text-sm text-gray-900">{dockKeys.length} {t.ready}</span>
-            </div>
-            {sheetOpen ? <X className="w-4 h-4 text-gray-400" /> : <ChevronUp className="w-4 h-4 text-gray-400" />}
+      {/* Bottom Navigation - Mobile Only */}
+      <div className="sm:hidden fixed bottom-0 inset-x-0 bg-white border-t border-gray-200">
+        <div className="flex items-center justify-around py-3">
+          <button className="flex flex-col items-center gap-1.5 py-2 px-4 rounded-lg hover:bg-gray-100 transition">
+            <span className="text-xl">🏠</span>
+            <span className="text-xs font-body text-gray-600">Home</span>
           </button>
-          {!sheetOpen && designImg && entries.length > 0 && (
-            <button
-              onClick={() => {
-                setGenerated(true);
-                setSheetOpen(false);
-              }}
-              className="shrink-0 mr-3 my-2 px-4 py-2 rounded-full font-display font-semibold text-xs text-white flex items-center gap-1.5"
-              style={{ backgroundColor: ACCENT.violet }}
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              {t.generateMockups}
-            </button>
-          )}
-          </div>
-          <div className="px-5 pb-5 overflow-y-auto max-h-[55vh]">
-            <DockContent t={t} dockKeys={dockKeys} />
-          </div>
+          <button className="flex flex-col items-center gap-1.5 py-2 px-4 rounded-lg hover:bg-gray-100 transition" style={{ color: ACCENT.violet }}>
+            <Shirt className="w-6 h-6" strokeWidth={2} />
+            <span className="text-xs font-body font-semibold" style={{ color: ACCENT.violet }}>Mockups</span>
+          </button>
+          <button className="flex flex-col items-center gap-1.5 py-2 px-4 rounded-lg hover:bg-gray-100 transition">
+            <span className="text-xl">📤</span>
+            <span className="text-xs font-body text-gray-600">Uploads</span>
+          </button>
+          <button className="flex flex-col items-center gap-1.5 py-2 px-4 rounded-lg hover:bg-gray-100 transition">
+            <span className="text-xl">❤️</span>
+            <span className="text-xs font-body text-gray-600">Favorites</span>
+          </button>
+          <button className="flex flex-col items-center gap-1.5 py-2 px-4 rounded-lg hover:bg-gray-100 transition">
+            <span className="text-xl">⚙️</span>
+            <span className="text-xs font-body text-gray-600">Settings</span>
+          </button>
         </div>
       </div>
     </div>
