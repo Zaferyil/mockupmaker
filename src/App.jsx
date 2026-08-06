@@ -633,6 +633,8 @@ function MockupStudio() {
         .font-display { font-family: 'Space Grotesk', sans-serif; }
         .font-body { font-family: 'Inter', sans-serif; }
         .font-mono2 { font-family: 'JetBrains Mono', monospace; }
+        /* list-none covers Firefox; WebKit needs its own marker suppressed. */
+        summary::-webkit-details-marker { display: none; }
       `}</style>
 
       {/* Header */}
@@ -1093,20 +1095,41 @@ function MockupStudio() {
   );
 }
 
+/**
+ * The selected-file list, collapsed by default.
+ *
+ * It is reference information rather than a control, and at a dozen-plus
+ * mockups the full list pushed the actual controls off screen. A native
+ * <details> keeps it one click away — and keeps it in the DOM, so nothing that
+ * reads from it changes behaviour.
+ */
 function DockContent({ t, dockKeys }) {
   return (
-    <>
-      <p className="text-[11px] tracking-[0.15em] uppercase text-gray-400 font-mono2 mb-2">{t.dockLabel}</p>
-      {dockKeys.length > 0 ? (
-        <ul className="space-y-1.5">
-          {dockKeys.map((k) => (
-            <li key={k} className="font-mono2 text-xs sm:text-sm break-all bg-gray-50 rounded-lg px-2.5 py-1.5 text-gray-700">{k}</li>
-          ))}
-        </ul>
-      ) : (
-        <p className="text-sm font-body text-gray-400 italic">{t.dockEmpty}</p>
-      )}
-    </>
+    <details className="group">
+      <summary className="flex items-center gap-1.5 cursor-pointer list-none select-none">
+        <ChevronDown className="w-3 h-3 text-gray-400 transition-transform group-open:rotate-180" />
+        <span className="text-[11px] tracking-[0.15em] uppercase text-gray-400 font-mono2">
+          {t.dockLabel}
+          {dockKeys.length > 0 && ` (${dockKeys.length})`}
+        </span>
+      </summary>
+      <div className="mt-2">
+        {dockKeys.length > 0 ? (
+          <ul className="space-y-1 max-h-48 overflow-y-auto">
+            {dockKeys.map((k) => (
+              <li
+                key={k}
+                className="font-mono2 text-[11px] break-all bg-white rounded px-2 py-1 text-gray-600"
+              >
+                {k}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm font-body text-gray-400 italic">{t.dockEmpty}</p>
+        )}
+      </div>
+    </details>
   );
 }
 
