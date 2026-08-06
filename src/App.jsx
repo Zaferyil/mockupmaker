@@ -629,7 +629,7 @@ function MockupStudio() {
   return (
     <div className="min-h-screen bg-white pb-20 sm:pb-8">
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
         .font-display { font-family: 'Space Grotesk', sans-serif; }
         .font-body { font-family: 'Inter', sans-serif; }
         .font-mono2 { font-family: 'JetBrains Mono', monospace; }
@@ -1187,12 +1187,13 @@ function SliderControl({ label, value, onChange, accent, min = 0, max = 100 }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        {/* JetBrains Mono is loaded at 400/500/600, so semibold renders as a
-            real weight rather than a synthesised one. */}
-        <span className="text-[10px] font-mono2 font-semibold uppercase tracking-wide text-gray-600">
+        {/* At 10px, 400 vs 600 in a monospace face is nearly invisible, so the
+            earlier semibold change read as no change at all. 700 (now included
+            in the font import) at 11px is a difference you can actually see. */}
+        <span className="text-[11px] font-mono2 font-bold uppercase tracking-wide text-gray-700">
           {label}
         </span>
-        <span className="text-[10px] font-mono2 font-semibold text-gray-500">{value}%</span>
+        <span className="text-[11px] font-mono2 font-bold text-gray-600">{value}%</span>
       </div>
       <input
         type="range"
