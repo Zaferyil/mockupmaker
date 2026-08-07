@@ -169,6 +169,29 @@ check(
   `diff on print = ${r.shadingHalo.diffOnPrint}`,
 );
 
+check(
+  "no stretching: a circle renders as a circle",
+  Math.abs(r.distortion.renderedAspect - 1) <= 0.01,
+  `rendered ${r.distortion.rendered} (aspect ${r.distortion.renderedAspect})`,
+);
+check(
+  "pinned lock keeps its calibrated width",
+  Math.abs(r.distortion.solvedWidth - r.distortion.lockedWidth) < 1e-6,
+  `locked ${r.distortion.lockedWidth} → solved ${r.distortion.solvedWidth}`,
+);
+
+const sc = r.scatter;
+check(
+  "solid-edged artwork keeps its exact bounds",
+  Math.abs(sc.plainTrim.w - sc.expectedW) < 0.005 && Math.abs(sc.plainTrim.h - sc.expectedH) < 0.005,
+  `trim ${sc.plainTrim.w}x${sc.plainTrim.h}, expected ${sc.expectedW}x${sc.expectedH}`,
+);
+check(
+  "decorative scatter does not inflate the trim box",
+  Math.abs(sc.confettiAspect - sc.plainAspect) / sc.plainAspect < 0.05,
+  `plain ${sc.plainAspect} vs confetti ${sc.confettiAspect} (trim ${sc.confettiTrim.w}x${sc.confettiTrim.h})`,
+);
+
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}\n`);
 shutdown();
 process.exit(failures === 0 ? 0 : 1);
