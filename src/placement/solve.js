@@ -7,7 +7,7 @@
 // same inputs, same output, no I/O, no model, no randomness. That is what
 // makes the pipeline reproducible.
 
-import { makePlacement, deriveHeight } from "./contract.js";
+import { makePlacement } from "./contract.js";
 
 /**
  * Fit artwork inside a chest area, preserving aspect ratio.
@@ -48,37 +48,5 @@ export function solvePlacement(chest, artwork, imageAspect, opacity = 100, sourc
     source,
     confidence: chest.confidence,
     perspective: chest.perspective,
-  });
-}
-
-/**
- * Re-fit an existing locked placement to a *different* artwork.
- *
- * Template Lock reuses centre, width and rotation. Height is not stored, so it
- * is re-derived from the new artwork's aspect — which is precisely why two
- * different designs land in the same spot at the same scale instead of one of
- * them being stretched to match the other's box.
- *
- * The one adjustment: if the new artwork is much taller, honouring the stored
- * width would run it past the hem, so width is reduced until the derived
- * height fits the locked band.
- *
- * @param {import('./contract.js').Placement} locked
- * @param {import('./artwork.js').ArtworkAnalysis} artwork
- * @param {number} imageAspect
- * @param {number} maxHeight  normalized height ceiling from the locked chest
- */
-export function refitLocked(locked, artwork, imageAspect, maxHeight) {
-  let width = locked.width;
-  const height = deriveHeight(width, artwork.visibleAspect, imageAspect);
-
-  if (maxHeight > 0 && height > maxHeight) {
-    width = width * (maxHeight / height);
-  }
-
-  return makePlacement({
-    ...locked,
-    width,
-    source: "locked",
   });
 }

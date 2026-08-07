@@ -293,7 +293,6 @@ const square = makeArtwork({ w: 800, h: 800 });
 //     stretching that eyeballing a photo cannot settle.
 {
   const { renderMockup } = await import("/src/placement/compositor.js");
-  const { refitLocked } = await import("/src/placement/solve.js");
   const { lockToChest } = await import("/src/placement/templateLock.js");
   const { makePlacement } = await import("/src/placement/contract.js");
 
@@ -318,9 +317,7 @@ const square = makeArtwork({ w: 800, h: 800 });
   const lock = { kind: "pinned", centerX: 0.513, centerY: 0.547, width: 0.347,
                  height: 0, rotation: 0, perspective: null, confidence: 1 };
   const chest = lockToChest(lock);
-  const placement = refitLocked(
-    makePlacement({ ...chest, opacity: 100, source: "locked", confidence: 1 }),
-    circleArt, 1, chest.height);
+  const placement = solvePlacement(chest, circleArt, 1, 100, "locked");
 
   const cv = document.createElement("canvas");
   cv.width = 1254; cv.height = 1254;
@@ -343,6 +340,34 @@ const square = makeArtwork({ w: 800, h: 800 });
     rendered: `${rw}x${rh}`,
     renderedAspect: +(rw / rh).toFixed(4),
   };
+
+  // Same locked rectangle, four very differently shaped artworks. Each must
+  // fit inside the box, touch it on exactly one axis, and keep its own
+  // proportions — that is what stops the design's aspect ratio from deciding
+  // how big the print comes out.
+  const shapes = [
+    { name: "square", w: 900, h: 900 },
+    { name: "portrait", w: 600, h: 1100 },
+    { name: "landscape", w: 1400, h: 700 },
+    { name: "tall", w: 500, h: 1400 },
+  ];
+  const fits = [];
+  for (const sh of shapes) {
+    const a = analyzeArtwork(await load(makeArtwork(sh)));
+    const pl = solvePlacement(chest, a, 1, 100, "locked");
+    const hh = deriveHeight(pl.width, a.visibleAspect, 1);
+    const renderedAspect = (pl.width / hh) * 1;
+    fits.push({
+      name: sh.name,
+      w: +pl.width.toFixed(4),
+      h: +hh.toFixed(4),
+      withinW: pl.width <= chest.width * 1.001,
+      withinH: hh <= chest.height * 1.001,
+      touches: Math.abs(pl.width - chest.width) < 1e-4 || Math.abs(hh - chest.height) < 1e-4,
+      aspectOk: Math.abs(renderedAspect - a.visibleAspect) / a.visibleAspect < 0.005,
+    });
+  }
+  results.lockedFit = { box: { w: +chest.width.toFixed(4), h: +chest.height.toFixed(4) }, fits };
 }
 
 // 11. decorative scatter must not define the design's size.

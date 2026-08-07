@@ -22,7 +22,7 @@ import { NEUTRAL_PLACEMENT, makePlacement, deriveHeight, fromLegacy } from "./co
 import { analyzeArtwork } from "./artwork.js";
 import { segmentGarment } from "./garmentMask.js";
 import { computeChestArea } from "./chestArea.js";
-import { solvePlacement, refitLocked } from "./solve.js";
+import { solvePlacement } from "./solve.js";
 import { enforce } from "./validate.js";
 import { createLockStore, lockToChest, importPlacements } from "./templateLock.js";
 
@@ -198,15 +198,12 @@ export async function resolvePlacement({
   const lock = locks?.get(templateId);
   if (lock) {
     const chest = lockToChest(lock);
-    const placement =
-      lock.kind === "pinned"
-        ? refitLocked(
-            makePlacement({ ...chest, opacity, source: "locked", confidence: 1 }),
-            artwork,
-            imageAspect,
-            chest.height,
-          )
-        : solvePlacement(chest, artwork, imageAspect, opacity, "locked");
+    // Both lock kinds now take the same path: fit the artwork inside the
+    // locked rectangle. Pinned locks used to reuse the stored *width* alone,
+    // which let each design's aspect ratio decide the rendered size. Fitting
+    // into the rectangle keeps the print's footprint fixed per template and
+    // the artwork's proportions untouched.
+    const placement = solvePlacement(chest, artwork, imageAspect, opacity, "locked");
 
     const { placement: safe, repairs, validation } = enforce(
       placement,

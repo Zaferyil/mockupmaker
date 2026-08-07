@@ -1512,7 +1512,10 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, resolved, status, 
         <TShirtSilhouette color={tshirtColor} />
       )}
 
-      {/* The measured printable chest area, not a fixed rectangle. */}
+      {/* The print area. Every design is fitted inside this rectangle keeping
+          its own proportions, so it — not the artwork's aspect ratio — decides
+          how large a print comes out. Labelled because the distinction between
+          this and the design box below drives the whole mental model. */}
       {chest && (
         <div
           className="absolute border border-dashed pointer-events-none"
@@ -1521,9 +1524,20 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, resolved, status, 
             top: `${(chest.centerY - chest.height / 2) * 100}%`,
             width: `${chest.width * 100}%`,
             height: `${chest.height * 100}%`,
-            borderColor: "rgba(0,194,168,0.55)",
+            borderColor: "rgba(0,194,168,0.7)",
           }}
-        />
+        >
+          <span
+            className="absolute font-mono2 uppercase whitespace-nowrap px-1 rounded-sm"
+            style={{
+              left: 0, top: 0, transform: "translateY(-115%)",
+              fontSize: "9px", letterSpacing: "0.08em",
+              color: "#fff", backgroundColor: ACCENT.teal,
+            }}
+          >
+            Print area
+          </span>
+        </div>
       )}
 
       {status === "analyzing" && !resolved && (
@@ -1660,8 +1674,14 @@ function PlacementReport({ resolved }) {
           {report.analysis.occluded && " · chest partly covered"}
         </p>
       )}
+      {resolved.chest && (
+        <p className="font-mono2 text-[10px] text-gray-500">
+          print area {(resolved.chest.width * 100).toFixed(1)}% ×{" "}
+          {(resolved.chest.height * 100).toFixed(1)}%
+        </p>
+      )}
       <p className="font-mono2 text-[10px] text-gray-400">
-        w {(placement.width * 100).toFixed(1)}%
+        design w {(placement.width * 100).toFixed(1)}%
         {placement.rotation ? ` · ${placement.rotation.toFixed(1)}°` : ""}
         {placement.perspective ? " · warped" : ""}
       </p>

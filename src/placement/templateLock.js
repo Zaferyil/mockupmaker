@@ -113,17 +113,20 @@ export function lockToChest(lock) {
     centerX: lock.centerX,
     centerY: lock.centerY,
     width: lock.width,
-    // A pinned lock records what a human chose: a centre and a width. It has
-    // no chest *height* — the stored number was one artwork's box, and for
-    // records migrated from older builds it is 0.
+    // The rectangle a human calibrated IS the print area.
     //
-    // This used to substitute `width * 1.6` as a stand-in band and shrink any
-    // artwork that would not fit it. That constant was invented, not measured,
-    // so a portrait design got silently narrowed below the width the user had
-    // calibrated. Reusing the chosen width verbatim is what Template Lock is
-    // for; a full-height band leaves the frame-bounds check in validate.js as
-    // the only limit, which is a real constraint rather than a guessed one.
-    height: lock.kind === "chest" ? lock.height : 1,
+    // Earlier versions treated a pinned lock as a width and left height
+    // unconstrained. That makes the rendered size depend entirely on each
+    // design's aspect ratio: a square design and a portrait one at the same
+    // width come out very different heights, which is the "it changes my
+    // design's size" complaint. Nothing about the artwork should decide how
+    // big the print is — the calibrated box should.
+    //
+    // With a real height, every design is fitted *inside* the same rectangle,
+    // touching it on whichever axis binds first and keeping its own
+    // proportions exactly. Legacy records carry height 0; those fall back to a
+    // square area so they still behave sanely until recalibrated.
+    height: lock.kind === "chest" ? lock.height : lock.height > 0 ? lock.height : lock.width,
     rotation: lock.rotation,
     perspective: lock.perspective,
     confidence: lock.confidence,

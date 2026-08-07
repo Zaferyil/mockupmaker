@@ -174,10 +174,25 @@ check(
   Math.abs(r.distortion.renderedAspect - 1) <= 0.01,
   `rendered ${r.distortion.rendered} (aspect ${r.distortion.renderedAspect})`,
 );
+// The locked rectangle is the print area: every artwork fits inside it,
+// touching one axis, keeping its own proportions. This replaces the older
+// "reuse the stored width" rule, under which each design's aspect ratio
+// decided how large the print came out.
+const lf = r.lockedFit;
 check(
-  "pinned lock keeps its calibrated width",
-  Math.abs(r.distortion.solvedWidth - r.distortion.lockedWidth) < 1e-6,
-  `locked ${r.distortion.lockedWidth} → solved ${r.distortion.solvedWidth}`,
+  "every artwork fits inside the locked print area",
+  lf.fits.every((f) => f.withinW && f.withinH),
+  `box ${lf.box.w}x${lf.box.h}; ` + lf.fits.map((f) => `${f.name} ${f.w}x${f.h}`).join(", "),
+);
+check(
+  "each artwork touches the print area on one axis",
+  lf.fits.every((f) => f.touches),
+  lf.fits.map((f) => `${f.name}:${f.touches}`).join(" "),
+);
+check(
+  "proportions preserved for every artwork shape",
+  lf.fits.every((f) => f.aspectOk),
+  lf.fits.map((f) => `${f.name}:${f.aspectOk}`).join(" "),
 );
 
 const sc = r.scatter;
