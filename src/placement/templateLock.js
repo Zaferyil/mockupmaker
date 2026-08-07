@@ -113,10 +113,17 @@ export function lockToChest(lock) {
     centerX: lock.centerX,
     centerY: lock.centerY,
     width: lock.width,
-    // A pinned lock has no meaningful chest height (it stored one artwork's
-    // box). Allow a generous band so a taller design is not clipped by a
-    // number that was never a chest measurement.
-    height: lock.kind === "chest" ? lock.height : Math.max(lock.height || 0, lock.width * 1.6),
+    // A pinned lock records what a human chose: a centre and a width. It has
+    // no chest *height* — the stored number was one artwork's box, and for
+    // records migrated from older builds it is 0.
+    //
+    // This used to substitute `width * 1.6` as a stand-in band and shrink any
+    // artwork that would not fit it. That constant was invented, not measured,
+    // so a portrait design got silently narrowed below the width the user had
+    // calibrated. Reusing the chosen width verbatim is what Template Lock is
+    // for; a full-height band leaves the frame-bounds check in validate.js as
+    // the only limit, which is a real constraint rather than a guessed one.
+    height: lock.kind === "chest" ? lock.height : 1,
     rotation: lock.rotation,
     perspective: lock.perspective,
     confidence: lock.confidence,

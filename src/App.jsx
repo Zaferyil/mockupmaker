@@ -253,6 +253,10 @@ function MockupStudio() {
   // deleted remotely is not resurrected by a stale in-memory store.
   const dirtyKeysRef = useRef(new Set());
   const [generated, setGenerated] = useState(false);
+  // Bumped on every Generate press. Previews key off it, so pressing the
+  // button after fixing a placement always repaints — rather than doing
+  // nothing visible because `generated` was already true.
+  const [generationId, setGenerationId] = useState(0);
   const [zipStatus, setZipStatus] = useState("idle"); // idle | zipping | error
 
   // R2 bucket'ındaki gerçek mockup dosyalarının canlı listesi
@@ -539,6 +543,11 @@ function MockupStudio() {
       }
       return next;
     });
+  }
+
+  function runGenerate() {
+    setGenerated(true);
+    setGenerationId((n) => n + 1);
   }
 
   /**
@@ -994,15 +1003,19 @@ function MockupStudio() {
                 )}
 
                 <button
-                  onClick={() => setGenerated(true)}
+                  onClick={runGenerate}
                   disabled={!designImg || entries.length === 0}
                   className="w-full font-display font-bold text-white rounded-lg py-3 px-4 flex items-center justify-center gap-2 transition disabled:opacity-50 text-base"
                   style={{ backgroundColor: ACCENT.violet }}
                 >
                   <Sparkles className="w-4 h-4" />
-                  Generate ({entries.length})
+                  {generated ? "Regenerate" : "Generate"} ({entries.length})
                 </button>
-                <p className="text-xs font-body text-gray-500 mt-1">~30-60 sec</p>
+                <p className="text-xs font-body text-gray-500 mt-1">
+                  {generated
+                    ? "Adjust a placement above, then regenerate"
+                    : "~30-60 sec"}
+                </p>
               </div>
             )}
           </div>
@@ -1029,6 +1042,17 @@ function MockupStudio() {
                     </span>
                   )}
                 </div>
+                <div className="flex items-center gap-2">
+                  {/* Reachable from the results themselves — spotting a bad
+                      placement here shouldn't mean scrolling back up. */}
+                  <button
+                    onClick={runGenerate}
+                    className="flex items-center gap-1.5 text-xs font-body font-semibold rounded-full px-3 py-1.5 border transition hover:bg-gray-50"
+                    style={{ borderColor: ACCENT.violet, color: ACCENT.violet }}
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    Regenerate
+                  </button>
                 <button
                   onClick={handleDownloadAll}
                   disabled={matchedEntries.length === 0 || zipStatus === "zipping"}
@@ -1038,6 +1062,7 @@ function MockupStudio() {
                   <Download className="w-3 h-3" />
                   {zipStatus === "zipping" ? t.zippingAll : t.downloadAll}
                 </button>
+                </div>
               </div>
               {zipStatus === "error" && (
                 <p className="text-xs font-body rounded-lg px-2.5 py-1.5 mb-2 inline-block" style={{ backgroundColor: "#FFF4EE", color: ACCENT.coral }}>
@@ -1057,6 +1082,7 @@ function MockupStudio() {
                     mockupSrc={e.src}
                     designSrc={designImg}
                     resolved={resolved[e.key]}
+                    generationId={generationId}
                     t={t}
                   />
                 ))}
@@ -1648,7 +1674,7 @@ function PlacementReport({ resolved }) {
   );
 }
 
-const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockupSrc, designSrc, resolved, t }, ref) {
+const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockupSrc, designSrc, resolved, generationId, t }, ref) {
   const canvasRef = useRef(null);
   const [hasImage, setHasImage] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -1701,7 +1727,9 @@ const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockup
     return () => {
       cancelled = true;
     };
-  }, [mockupSrc, designSrc, resolved]);
+    // generationId is in the deps so pressing Generate always repaints,
+    // even when nothing else changed.
+  }, [mockupSrc, designSrc, resolved, generationId]);
 
   function download() {
     const canvas = canvasRef.current;
