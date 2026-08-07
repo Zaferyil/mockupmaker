@@ -22,6 +22,7 @@ import { NEUTRAL_PLACEMENT, makePlacement, deriveHeight, fromLegacy } from "./co
 import { analyzeArtwork } from "./artwork.js";
 import { segmentGarment } from "./garmentMask.js";
 import { computeChestArea } from "./chestArea.js";
+import { chestAreaFromPose } from "./poseLandmarks.js";
 import { solvePlacement } from "./solve.js";
 import { enforce } from "./validate.js";
 import { createLockStore, lockToChest, importPlacements } from "./templateLock.js";
@@ -125,6 +126,23 @@ async function measureTemplate(templateId, mockupImage, artwork, log) {
   if (chestCache.has(templateId)) return chestCache.get(templateId);
 
   const promise = (async () => {
+    // Tier A: body landmarks. Preferred whenever a person is in frame, because
+    // shoulders and hips are found from body structure — so shirt colour,
+    // background clutter, fold shadows and whether the model is seated or
+    // standing all stop mattering. Those were precisely the variables the
+    // colour-based measurement could not survive.
+    const posed = await chestAreaFromPose(mockupImage);
+    if (posed) {
+      log?.(
+        `pose landmarks conf=${posed.confidence.toFixed(2)} ` +
+          `shoulderSpan=${posed.landmarks.shoulderSpan.toFixed(3)} ${posed.analysis.pose}`,
+      );
+      return posed;
+    }
+
+    // Tier B: garment mask. Flat lays have no body to find, and this is also
+    // the path when the pose model cannot load.
+    log?.("no pose detected — measuring the garment instead");
     const roi = await findPersonROI(mockupImage);
     log?.(`roi=${roi ? `${(roi.score * 100).toFixed(0)}%` : "none (centred prior)"}`);
 

@@ -16,6 +16,7 @@ import { computeChestArea } from "/src/placement/chestArea.js";
 import { solvePlacement } from "/src/placement/solve.js";
 import { analyzeArtwork } from "/src/placement/artwork.js";
 import { renderMockup } from "/src/placement/compositor.js";
+import { chestAreaFromPose } from "/src/placement/poseLandmarks.js";
 
 const BASE = "/test/fixtures";
 const FILES = ["Black","Crimson","Crunchberry","Denim","Light Green","Moss",
@@ -60,10 +61,16 @@ for (const name of FILES) {
 
   try {
     const img = await load(url);
-    const garment = segmentGarment(img, null);
-    if (!garment) { cap.textContent = `${name}: SEGMENT FAIL`; rows.push({name, error:"segment"}); continue; }
-    const chest = computeChestArea(garment, art);
-    if (!chest) { cap.textContent = `${name}: CHEST FAIL`; rows.push({name, error:"chest", maskConf:garment.confidence}); continue; }
+    // Tier A: pose. Tier B: garment mask.
+    let chest = await chestAreaFromPose(img, { modelUrl: "/test/fixtures/movenet/model.json" });
+    let via = "pose";
+    if (!chest) {
+      via = "mask";
+      const garment = segmentGarment(img, null);
+      if (!garment) { cap.textContent = `${name}: SEGMENT FAIL`; rows.push({name, error:"segment"}); continue; }
+      chest = computeChestArea(garment, art);
+      if (!chest) { cap.textContent = `${name}: CHEST FAIL`; rows.push({name, error:"chest"}); continue; }
+    }
 
     const imageAspect = img.naturalWidth / img.naturalHeight;
     const placement = solvePlacement(chest, art, imageAspect, 100);
@@ -78,23 +85,22 @@ for (const name of FILES) {
     ctx.strokeStyle = "rgba(0,200,120,0.95)"; ctx.lineWidth = 2;
     ctx.strokeRect((chest.centerX-chest.width/2)*W, (chest.centerY-chest.height/2)*H,
                    chest.width*W, chest.height*H);
-    // landmarks
-    if (chest.landmarks) {
-      const L = chest.landmarks;
+    if (chest.landmarks && chest.landmarks.shoulderMidY != null) {
       ctx.strokeStyle = "rgba(255,60,0,0.9)"; ctx.lineWidth = 1.5;
-      for (const y of [L.collarBottom, L.armpit]) {
+      for (const y of [chest.landmarks.shoulderMidY, chest.landmarks.hipMidY]) {
+        if (y == null) continue;
         ctx.beginPath(); ctx.moveTo(0, y*H); ctx.lineTo(W, y*H); ctx.stroke();
       }
     }
-    cap.textContent = `${name}  cy=${chest.centerY.toFixed(3)} w=${placement.width.toFixed(3)} conf=${chest.confidence.toFixed(2)} ${chest.analysis.pose}/${chest.analysis.cameraAngle}`;
-    rows.push({ name, cx:+placement.centerX.toFixed(3), cy:+placement.centerY.toFixed(3),
+    cap.textContent = `${name} [${via}] cy=${chest.centerY.toFixed(3)} w=${placement.width.toFixed(3)} rot=${placement.rotation.toFixed(1)} ${chest.analysis.pose}`;
+    rows.push({ name, via, cx:+placement.centerX.toFixed(3), cy:+placement.centerY.toFixed(3),
                 w:+placement.width.toFixed(3), rot:+placement.rotation.toFixed(1),
-                conf:+chest.confidence.toFixed(2), maskConf:+garment.confidence.toFixed(2),
+                conf:+chest.confidence.toFixed(2),
                 pose:chest.analysis.pose, angle:chest.analysis.cameraAngle,
-                occl:+chest.analysis.occlusionRatio.toFixed(2),
-                collar:+chest.landmarks.collarBottom.toFixed(3),
-                armpit:+chest.landmarks.armpit.toFixed(3),
-                torsoW:+chest.landmarks.torsoWidth.toFixed(3) });
+                spanN: chest.landmarks.shoulderSpan!=null?+chest.landmarks.shoulderSpan.toFixed(4):null,
+                shMidY: chest.landmarks.shoulderMidY!=null?+chest.landmarks.shoulderMidY.toFixed(4):null,
+                torsoL: chest.landmarks.torsoLength!=null?+chest.landmarks.torsoLength.toFixed(4):null,
+                imgAspect:+imageAspect.toFixed(4) });
   } catch (e) {
     cap.textContent = `${name}: ${e.message}`;
     rows.push({ name, error: e.message });

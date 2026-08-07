@@ -31,13 +31,17 @@ also the strongest argument for the Template Lock design.
 ## Pipeline
 
 ```
-artwork PNG ──► artwork.js      trim, aspect, orientation, recommended size
-                                        │
-mockup photo ──► garmentMask.js ──► chestArea.js ──► solve.js ──► validate.js ──► compositor.js
-                 shirt mask         landmarks +      fit,          tolerance      artwork, then
-                 (region grow)      print band       preserve AR   check + repair fabric shading
-                                        │
-                                  templateLock.js  measured once, reused forever
+artwork PNG ──► artwork.js  trim, aspect, orientation, recommended size
+                                    │
+mockup photo ─┬─► poseLandmarks.js ─┤   person in frame: shoulders + hips
+              └─► garmentMask.js ───┤   flat lay: colour region grow
+                    → chestArea.js  │
+                                    ▼
+                            solve.js ──► validate.js ──► compositor.js
+                            contain fit  tolerance       artwork, then
+                            preserve AR  check + repair  fabric shading
+                                    │
+                            templateLock.js  measured once, reused forever
 ```
 
 Resolution order, highest authority first:
@@ -79,7 +83,53 @@ slightly resized", because it varies per artwork file rather than per mockup.
 Everything downstream consumes the alpha-trimmed box. Verified by test: the
 same visible design with and without 25% padding renders byte-identical ink.
 
+### `poseLandmarks.js` — the print area from anatomy
+
+The primary path whenever a person is in frame. MoveNet gives shoulder and hip
+keypoints, and the print area follows from those directly:
+
+```
+width   ∝ shoulder separation
+top     ∝ a fraction of that separation below the shoulder line
+axis    = shoulder midpoint → hip midpoint
+```
+
+This exists because colour segmentation hit a hard ceiling on real lifestyle
+photography. Separating shirt from room by colour fails when a beige wall, a
+cream sofa and pale wood differ from the garment by less than the garment's own
+fold shadows do — tightening the threshold fragmented the shirt, loosening it
+leaked into the furniture, and no single value served twelve scenes. Measured
+across the twelve production mockups, the colour path left centres scattered
+over 20% of the frame width; the pose path holds them inside 6%.
+
+Body structure is found regardless of shirt colour, background or creasing, and
+because every dimension is a multiple of shoulder separation the result is
+invariant to camera distance. A seated model and a standing one need no special
+case: the shoulder→hip vector shortens under foreshortening and the height cap
+follows it.
+
+**The geometry constants are fitted, not assumed.** For each of the twelve
+hand-calibrated mockups the shoulder landmarks were measured and solved against
+the box a human had actually chosen, then the medians taken. Textbook
+proportions had placed every print about a sixth of a shoulder-span too low and
+appreciably too narrow.
+
+Rotation is heavily damped and off below 9°. A shoulder line tilts both when a
+model leans and when a turned torso brings the near shoulder closer to the
+camera, and those look identical from keypoints. Across twelve mockups — several
+with 8-11° shoulder tilts — the human chose zero rotation every time, so the
+tilt these photographs carry is the second kind.
+
+The TFJS backend is explicitly initialised before the model loads: pose-detection
+registers a WebGPU backend that then wins tfjs's priority ordering, but
+registration is not initialisation, and the first tensor allocation throws
+without it.
+
 ### `garmentMask.js` — a real mask, not a bounding box
+
+The fallback path, used for flat lays where there is no body to find, and when
+the pose model cannot load.
+
 
 Classical region growing, not a neural segmenter. A learned model re-introduces
 the variance we are removing: its mask shifts with pose and crop, so the print
