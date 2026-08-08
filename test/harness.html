@@ -536,6 +536,55 @@ const square = makeArtwork({ w: 800, h: 800 });
   results.previewMatch = { preview, exported };
 }
 
+// 14. warp-era locks must not resurrect a disabled feature.
+//     Two real mockups (a red and a white flat-lay) kept rendering an
+//     oversized, tilted, warped print long after the warp was switched off,
+//     because their stored v2 locks carried a quad and locks are replayed
+//     verbatim. Gating quad *production* could never have caught that; the
+//     fix is enforced at import and at the placement boundary, so this test
+//     drives both.
+{
+  const { importPlacements, lockToChest } = await import("/src/placement/templateLock.js");
+  const { fromLegacy, makePlacement, PERSPECTIVE_ENABLED } =
+    await import("/src/placement/contract.js");
+
+  // Verbatim shape of the two records found in the live R2 bucket.
+  const quad = [0.0156, 0.2031, 0.9726, 0.2031, 0.9804, 0.7562, 0.3007, 0.7562];
+  const stale = {
+    staleChest: { templateId: "staleChest", kind: "chest", centerX: 0.494, centerY: 0.479,
+                  width: 0.3805, height: 0.5531, rotation: 5.39, perspective: quad,
+                  confidence: 0.8, version: 2 },
+    stalePinned: { templateId: "stalePinned", kind: "pinned", centerX: 0.48, centerY: 0.47,
+                   width: 0.243, height: 0.234, rotation: -7, perspective: quad,
+                   confidence: 1, version: 2 },
+    cleanChest: { templateId: "cleanChest", kind: "chest", centerX: 0.51, centerY: 0.43,
+                  width: 0.4007, height: 0.4199, rotation: 0, perspective: null,
+                  confidence: 0.9, version: 2 },
+  };
+  const imported = importPlacements(stale, fromLegacy);
+
+  // A quad that survives import would still have to survive the contract.
+  const forced = makePlacement({ centerX: 0.5, centerY: 0.4, width: 0.3, rotation: 0,
+                                 opacity: 100, confidence: 1, perspective: quad });
+
+  results.staleWarp = {
+    enabled: PERSPECTIVE_ENABLED,
+    // The machine measurement from the broken era is discarded outright, so
+    // the template gets measured again by the current code.
+    chestDropped: !("staleChest" in imported),
+    // A human's box survives; only the quad rides out.
+    pinnedKept: "stalePinned" in imported,
+    pinnedQuad: imported.stalePinned?.perspective ?? null,
+    pinnedWidth: imported.stalePinned?.width ?? null,
+    // An untouched record is untouched.
+    cleanKept: "cleanChest" in imported,
+    cleanWidth: imported.cleanChest?.width ?? null,
+    // Both remaining doors into the renderer.
+    lockQuad: lockToChest({ ...stale.stalePinned }).perspective,
+    placementQuad: forced.perspective,
+  };
+}
+
 window.__RESULTS__ = results;
 document.title = "done";
 </script>

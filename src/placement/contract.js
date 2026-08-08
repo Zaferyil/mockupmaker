@@ -33,6 +33,26 @@
  *                                        normalized, or null for no warp
  */
 
+/**
+ * Master switch for the projective warp.
+ *
+ * The warp is fully implemented and tested — see `homography.js` and the
+ * compositor's triangle mesh — but it is not emitted, because on near-frontal
+ * POD photography the measured taper is dominated by anatomy and noise rather
+ * than by camera angle, and warping on noise looks worse than not warping.
+ *
+ * It lives here, in the contract, rather than in the detector that produces
+ * quads, because gating *production* alone turned out not to be enough. A quad
+ * measured while the flag was on gets stored in a template lock, and a stored
+ * lock is replayed verbatim on every later render — so a disabled feature could
+ * resurrect itself months later from persisted data. Two real mockups (a red
+ * and a white flat-lay) were still being warped for exactly that reason.
+ *
+ * Gating it at `makePlacement` instead makes the flag authoritative at the only
+ * point every placement in the system passes through, whatever its provenance.
+ */
+export const PERSPECTIVE_ENABLED = false;
+
 /** Tolerances from the spec. Exceeding any of these triggers a recompute. */
 export const TOLERANCE = {
   center: 0.02, // 2% of image dimension
@@ -67,7 +87,10 @@ export function makePlacement(p) {
     opacity: Math.min(100, Math.max(0, p.opacity ?? 100)),
     source: p.source ?? "solved",
     confidence: clamp01(p.confidence ?? 0),
-    perspective: Array.isArray(p.perspective) && p.perspective.length === 8 ? p.perspective : null,
+    perspective:
+      PERSPECTIVE_ENABLED && Array.isArray(p.perspective) && p.perspective.length === 8
+        ? p.perspective
+        : null,
   };
 }
 

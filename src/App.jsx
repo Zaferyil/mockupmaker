@@ -14,6 +14,7 @@ import {
   Move,
   Folder,
   LogOut,
+  ZoomIn,
 } from "lucide-react";
 import { LoginPage } from "./LoginPage";
 import { AdminPanel } from "./AdminPanel";
@@ -1758,10 +1759,22 @@ function PlacementReport({ resolved }) {
   );
 }
 
+/**
+ * How far the inspect-on-hover zoom magnifies.
+ *
+ * The canvas is composited at the mockup's full resolution and only CSS-scaled
+ * down to thumbnail size, so magnifying it reveals real pixels rather than an
+ * upscale. A 4000px source in a ~250px tile is displayed at roughly 6% — 3x is
+ * a useful look at the print edge while staying far inside the native detail.
+ */
+const ZOOM_FACTOR = 3;
+
 const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockupSrc, designSrc, resolved, generationId, t }, ref) {
   const canvasRef = useRef(null);
   const [hasImage, setHasImage] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+  /** Cursor position as a percentage of the tile, or null when not zooming. */
+  const [zoomAt, setZoomAt] = useState(null);
 
   useEffect(() => {
     setLoadFailed(false);
@@ -1848,9 +1861,55 @@ const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockup
     );
   }
 
+  // Inspect-on-hover. The zoom is a CSS transform on the existing canvas with
+  // its origin pinned under the cursor, so pointing at a spot magnifies that
+  // spot. Nothing is re-rendered and no second bitmap is allocated — with a
+  // dozen full-resolution mockups on screen, a magnifier that copied pixels
+  // per frame would cost far more than the feature is worth.
+  const trackZoom = (clientX, clientY, el) => {
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    setZoomAt({
+      x: Math.min(100, Math.max(0, ((clientX - r.left) / r.width) * 100)),
+      y: Math.min(100, Math.max(0, ((clientY - r.top) / r.height) * 100)),
+    });
+  };
+
   return (
     <div className="bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100">
-      <canvas ref={canvasRef} className="w-full h-auto block bg-gray-100" />
+      <div
+        className="relative overflow-hidden bg-gray-100"
+        style={{ cursor: hasImage ? (zoomAt ? "zoom-out" : "zoom-in") : "default" }}
+        onMouseMove={(e) => hasImage && trackZoom(e.clientX, e.clientY, e.currentTarget)}
+        onMouseLeave={() => setZoomAt(null)}
+        // Touch gets the same behaviour: drag a finger to pan the magnified
+        // view, lift to drop back out.
+        onTouchStart={(e) =>
+          hasImage && trackZoom(e.touches[0].clientX, e.touches[0].clientY, e.currentTarget)
+        }
+        onTouchMove={(e) =>
+          hasImage && trackZoom(e.touches[0].clientX, e.touches[0].clientY, e.currentTarget)
+        }
+        onTouchEnd={() => setZoomAt(null)}
+      >
+        <canvas
+          ref={canvasRef}
+          className="w-full h-auto block"
+          style={{
+            transform: zoomAt ? `scale(${ZOOM_FACTOR})` : "none",
+            transformOrigin: zoomAt ? `${zoomAt.x}% ${zoomAt.y}%` : "center",
+            transition: "transform 120ms ease-out",
+          }}
+        />
+        {hasImage && !zoomAt && (
+          <span
+            className="absolute bottom-1.5 right-1.5 w-5 h-5 rounded-full flex items-center justify-center pointer-events-none"
+            style={{ backgroundColor: "rgba(17,24,39,0.55)" }}
+          >
+            <ZoomIn className="w-3 h-3 text-white" strokeWidth={2.5} />
+          </span>
+        )}
+      </div>
       <div className="p-2 flex items-center justify-between gap-2">
         <span className="font-body text-[11px] text-gray-700 font-medium truncate">{label}</span>
         <button

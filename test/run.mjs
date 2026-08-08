@@ -218,6 +218,31 @@ check(
   `preview ${JSON.stringify(pm.preview)} vs export ${JSON.stringify(pm.exported)}`,
 );
 
+// A disabled feature must not be able to switch itself back on from stored
+// data. These four checks are the ones that would have caught the red/white
+// flat-lay regression, which lived entirely in persisted locks.
+const sw = r.staleWarp;
+check(
+  "warp-era chest lock is dropped so the template re-measures",
+  sw.chestDropped,
+  `enabled=${sw.enabled}`,
+);
+check(
+  "warp-era pinned lock survives with its box, minus the quad",
+  sw.pinnedKept && sw.pinnedQuad === null && Math.abs(sw.pinnedWidth - 0.243) < 1e-9,
+  `kept=${sw.pinnedKept} quad=${JSON.stringify(sw.pinnedQuad)} width=${sw.pinnedWidth}`,
+);
+check(
+  "a clean lock is imported unchanged",
+  sw.cleanKept && Math.abs(sw.cleanWidth - 0.4007) < 1e-9,
+  `kept=${sw.cleanKept} width=${sw.cleanWidth}`,
+);
+check(
+  "no stored quad can reach the renderer while the warp is off",
+  sw.enabled === false && sw.lockQuad === null && sw.placementQuad === null,
+  `lockToChest=${JSON.stringify(sw.lockQuad)} makePlacement=${JSON.stringify(sw.placementQuad)}`,
+);
+
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}\n`);
 shutdown();
 process.exit(failures === 0 ? 0 : 1);

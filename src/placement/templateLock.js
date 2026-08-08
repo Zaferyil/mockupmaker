@@ -26,7 +26,15 @@
 // Every hand-calibrated placement already in the R2 bucket is imported as a
 // 'pinned' lock, so existing good mockups keep their exact appearance.
 
-const LOCK_VERSION = 2;
+import { PERSPECTIVE_ENABLED } from "./contract.js";
+
+// v3 drops the perspective quad. See `quarantinePerspective` below.
+const LOCK_VERSION = 3;
+
+/** Quads are only ever persisted while the warp is actually enabled — see the
+ *  contract. Storing one otherwise would make a fresh lock look, to the next
+ *  session's importer, exactly like a stale warp-era record. */
+const storableQuad = (quad) => (PERSPECTIVE_ENABLED ? (quad ?? null) : null);
 
 /**
  * @typedef {Object} TemplateLock
@@ -64,7 +72,7 @@ export function createLockStore(initial = {}) {
         width: chest.width,
         height: chest.height,
         rotation: chest.rotation,
-        perspective: chest.perspective,
+        perspective: storableQuad(chest.perspective),
         confidence: chest.confidence,
         version: LOCK_VERSION,
       };
@@ -82,7 +90,7 @@ export function createLockStore(initial = {}) {
         width: placement.width,
         height: derivedHeight ?? 0,
         rotation: placement.rotation ?? 0,
-        perspective: placement.perspective ?? null,
+        perspective: storableQuad(placement.perspective),
         confidence: 1,
         version: LOCK_VERSION,
       };
@@ -128,7 +136,11 @@ export function lockToChest(lock) {
     // square area so they still behave sanely until recalibrated.
     height: lock.kind === "chest" ? lock.height : lock.height > 0 ? lock.height : lock.width,
     rotation: lock.rotation,
-    perspective: lock.perspective,
+    // Never replay a stored quad while the warp is off. Import already
+    // quarantines them, but a lock can also arrive from a tab that loaded an
+    // older bundle, and a persisted record must not be able to switch a
+    // disabled feature back on.
+    perspective: PERSPECTIVE_ENABLED ? lock.perspective : null,
     confidence: lock.confidence,
     landmarks: null,
     analysis: { fromLock: true, kind: lock.kind },
@@ -136,11 +148,39 @@ export function lockToChest(lock) {
 }
 
 /**
+ * Quarantine a lock that was written while the perspective warp was live.
+ *
+ * A stored quad is not just a stale field — it is a fingerprint. Every lock
+ * carrying one was measured by the warp-era code, whose print area came out at
+ * a height/width ratio of ~1.45 against the ~1.05 the current measurement
+ * produces, with a spurious tilt on top. So the quad marks the whole record as
+ * untrustworthy, not merely one attribute of it.
+ *
+ * The two kinds are therefore treated differently:
+ *
+ *   'chest'  — a pure machine measurement from the broken era. Dropped, so the
+ *              template is measured again by the current code. This is what was
+ *              rendering the red and white flat-lays with an oversized,
+ *              tilted, warped print while their siblings were fine.
+ *   'pinned' — a human dragged this box, and that judgement is still valid; the
+ *              quad merely rode along on the placement being pinned. The box is
+ *              kept and only the quad is stripped.
+ *
+ * @returns {object|null} migrated lock, or null to force a re-measure
+ */
+function quarantinePerspective(rec) {
+  if (!rec.perspective) return { ...rec, version: LOCK_VERSION };
+  if (rec.kind === "chest") return null;
+  return { ...rec, perspective: null, version: LOCK_VERSION };
+}
+
+/**
  * Import whatever the `/placements` endpoint returned.
  *
- * Handles three generations of record: v2 locks, v1 canonical placements, and
- * the original percent boxes. Older formats are all treated as pinned, because
- * the only reason any of them exists is that a human put it there.
+ * Handles four generations of record: v3 locks, v2 locks, v1 canonical
+ * placements, and the original percent boxes. Older formats are all treated as
+ * pinned, because the only reason any of them exists is that a human put it
+ * there.
  */
 export function importPlacements(raw, fromLegacy) {
   const out = {};
@@ -151,6 +191,12 @@ export function importPlacements(raw, fromLegacy) {
 
     if (rec.version === LOCK_VERSION && rec.kind) {
       out[id] = rec;
+      continue;
+    }
+
+    if (rec.version === 2 && rec.kind) {
+      const migrated = quarantinePerspective(rec);
+      if (migrated) out[id] = migrated;
       continue;
     }
 

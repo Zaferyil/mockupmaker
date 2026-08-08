@@ -30,6 +30,7 @@
 import * as tf from "@tensorflow/tfjs";
 import * as poseDetection from "@tensorflow-models/pose-detection";
 import { mapRectIntoQuad, quadTaper } from "./homography.js";
+import { PERSPECTIVE_ENABLED } from "./contract.js";
 
 /**
  * Bring a usable TFJS backend up before any model touches a tensor.
@@ -88,19 +89,14 @@ const MAX_ROTATION = 6;
 const MIN_TAPER = 0.03;
 
 /**
- * Perspective warping is built and tested but not emitted.
+ * Perspective warping is built and tested but not emitted. The switch lives in
+ * the contract — see `PERSPECTIVE_ENABLED` there for why it is enforced at the
+ * placement boundary rather than only here, where quads are produced.
  *
- * The transform itself is correct — a design pushed through a 2:1 trapezoid
- * measures a 1.93 taper — but the editor preview draws with CSS and cannot
- * show a warp, so enabling it puts the preview and the exported file back into
- * disagreement, which is the exact defect this pipeline was built to remove.
- * Seeing the true result only after export is worse than not warping at all.
- *
- * Turning this on requires the preview to render through the compositor rather
- * than through CSS. Until then the quad is computed and discarded, so the code
- * stays exercised by the test suite instead of rotting.
+ * The quad is still computed and then discarded, so the code stays exercised by
+ * the test suite instead of rotting.
  */
-const EMIT_PERSPECTIVE = false;
+const EMIT_PERSPECTIVE = PERSPECTIVE_ENABLED;
 
 let detectorPromise = null;
 let detectorKey = null;
