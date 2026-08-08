@@ -319,10 +319,13 @@ function fitTilt(centers, torsoWidth) {
   if (torsoWidth > 0 && rms / torsoWidth > 0.06) return 0;
 
   const deg = Math.atan(slope) * (180 / Math.PI);
-  // Sub-degree tilts are noise; large ones are artefacts. Only a genuine,
-  // moderate lean survives.
-  if (Math.abs(deg) < 1.5) return 0;
-  return Math.max(-7, Math.min(7, deg));
+
+  // Same deadzone the pose path uses. A silhouette centre-line tilt of a couple
+  // of degrees is measurement noise, and it was reaching the output as a
+  // visible 2.5-degree rotation on prints that should have been square. Both
+  // paths now have to clear the same bar before anything is rotated.
+  if (Math.abs(deg) < 9) return 0;
+  return Math.max(-6, Math.min(6, Math.sign(deg) * (Math.abs(deg) - 9) * 0.5));
 }
 
 function interpolateCenter(centers, y, fallback) {
