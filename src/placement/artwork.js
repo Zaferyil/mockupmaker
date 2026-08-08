@@ -88,11 +88,6 @@ export function analyzeArtwork(image) {
   let inkPixels = 0;
   let anyTransparent = false;
 
-  // Ink weight per column and per row, so the bounds can be taken from where
-  // the design actually *is* rather than from its furthest stray pixel.
-  const colInk = new Float64Array(w);
-  const rowInk = new Float64Array(h);
-
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const a = data[(y * w + x) * 4 + 3];
@@ -101,10 +96,6 @@ export function analyzeArtwork(image) {
         continue;
       }
       inkPixels++;
-      // Weight by opacity: a faint speck counts for far less than solid ink.
-      const weight = a / 255;
-      colInk[x] += weight;
-      rowInk[y] += weight;
       if (x < minX) minX = x;
       if (x > maxX) maxX = x;
       if (y < minY) minY = y;
@@ -115,25 +106,24 @@ export function analyzeArtwork(image) {
   // Fully opaque or fully empty — nothing to trim.
   if (maxX < 0) return fallback();
 
-  // Trim to the box holding all but a sliver of the ink at each edge.
+  // The trim box must contain EVERY visible pixel.
   //
-  // An absolute min/max bound is decided by the single furthest pixel, so
-  // decorative confetti — scattered snowflakes, faint gold flecks, a soft
-  // glow — sets the design's size. The bounding box inflates, the artwork is
-  // scaled to fit that box, and the part anyone actually looks at comes out
-  // smaller than the calibrated width. Designs without scatter are unaffected,
-  // which is exactly the "yesterday's files were fine, today's isn't" split.
+  // An earlier version discarded a fraction of a percent of the ink mass at
+  // each edge, on the theory that scattered decoration should not decide the
+  // design's size. That was wrong, and backwards: the excluded pixels are
+  // still drawn. The renderer scales the whole PNG so that the *trim* box
+  // lands on the placement box, so anything cropped out of the trim renders
+  // outside the placement — scattered hearts and flowers ended up past the
+  // garment entirely, and the tighter the trim the larger the overspill.
   //
-  // Discarding a fraction of a percent of the ink mass per edge hugs the real
-  // content while leaving solid-edged artwork untouched.
-  const [tx0, tx1] = inkBounds(colInk, minX, maxX);
-  const [ty0, ty1] = inkBounds(rowInk, minY, maxY);
-
+  // Bounding every visible pixel is what makes "the design exactly fills its
+  // box" true, and that identity is what keeps the box, the preview and the
+  // export describing the same thing.
   const trim = {
-    x: tx0 / w,
-    y: ty0 / h,
-    w: (tx1 - tx0 + 1) / w,
-    h: (ty1 - ty0 + 1) / h,
+    x: minX / w,
+    y: minY / h,
+    w: (maxX - minX + 1) / w,
+    h: (maxY - minY + 1) / h,
   };
 
   const visibleAspect = (trim.w * cw) / (trim.h * ch);
@@ -151,46 +141,6 @@ export function analyzeArtwork(image) {
     recommendedWidthOfChest: recommendFor(visibleAspect),
     hasAlpha: anyTransparent,
   };
-}
-
-/** Ink mass allowed to fall outside the trim box on each edge. */
-const EDGE_INK_TOLERANCE = 0.004;
-
-/**
- * Bounds containing all but `EDGE_INK_TOLERANCE` of the ink at each end.
- *
- * Never tightens past the point where a real edge sits: the walk stops as soon
- * as the accumulated weight exceeds the budget, so a solid-edged design keeps
- * its exact bounds (its first column alone blows the budget).
- */
-function inkBounds(profile, absMin, absMax) {
-  let total = 0;
-  for (let i = absMin; i <= absMax; i++) total += profile[i];
-  if (total <= 0) return [absMin, absMax];
-
-  const budget = total * EDGE_INK_TOLERANCE;
-
-  let lo = absMin;
-  let acc = 0;
-  for (let i = absMin; i <= absMax; i++) {
-    acc += profile[i];
-    if (acc > budget) {
-      lo = i;
-      break;
-    }
-  }
-
-  let hi = absMax;
-  acc = 0;
-  for (let i = absMax; i >= absMin; i--) {
-    acc += profile[i];
-    if (acc > budget) {
-      hi = i;
-      break;
-    }
-  }
-
-  return hi > lo ? [lo, hi] : [absMin, absMax];
 }
 
 function orientationOf(aspect) {

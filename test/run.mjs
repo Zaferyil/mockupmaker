@@ -195,16 +195,11 @@ check(
   lf.fits.map((f) => `${f.name}:${f.aspectOk}`).join(" "),
 );
 
-const sc = r.scatter;
+const os = r.overspill;
 check(
-  "solid-edged artwork keeps its exact bounds",
-  Math.abs(sc.plainTrim.w - sc.expectedW) < 0.005 && Math.abs(sc.plainTrim.h - sc.expectedH) < 0.005,
-  `trim ${sc.plainTrim.w}x${sc.plainTrim.h}, expected ${sc.expectedW}x${sc.expectedH}`,
-);
-check(
-  "decorative scatter does not inflate the trim box",
-  Math.abs(sc.confettiAspect - sc.plainAspect) / sc.plainAspect < 0.05,
-  `plain ${sc.plainAspect} vs confetti ${sc.confettiAspect} (trim ${sc.confettiTrim.w}x${sc.confettiTrim.h})`,
+  "rendered ink stays inside the placement box",
+  os.worst <= 2,
+  `worst overspill ${os.worst}px; drawn ${JSON.stringify(os.drawn)} box ${JSON.stringify(os.box)}`,
 );
 
 check(

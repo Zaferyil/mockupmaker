@@ -370,37 +370,67 @@ const square = makeArtwork({ w: 800, h: 800 });
   results.lockedFit = { box: { w: +chest.width.toFixed(4), h: +chest.height.toFixed(4) }, fits };
 }
 
-// 11. decorative scatter must not define the design's size.
-//     Two artworks with the SAME solid content; one also has faint confetti
-//     flung toward the canvas edges. Their trim boxes should agree closely,
-//     and the solid-edged one must keep its exact bounds.
+// 11. rendered ink must stay inside the placement box.
+//     The renderer scales the whole PNG so the trim box lands on the placement
+//     box, so any visible pixel excluded from the trim renders *outside* the
+//     placement. This is what a tightened trim broke: scattered decoration
+//     spilled past the garment. Bounding every visible pixel is the invariant.
 {
-  const mk = (scatter) => {
-    const c = document.createElement("canvas");
-    c.width = 1024; c.height = 1024;
+  const { renderMockup } = await import("/src/placement/compositor.js");
+
+  // Solid block plus decoration flung toward the canvas corners — the shape
+  // that produced the overspill.
+  const c = document.createElement("canvas");
+  c.width = 1024; c.height = 1024;
+  {
     const g = c.getContext("2d");
     g.clearRect(0, 0, 1024, 1024);
     g.fillStyle = "#1b2c6b";
-    g.fillRect(262, 200, 500, 620);            // the actual design
-    if (scatter) {
-      g.fillStyle = "rgba(220,190,120,0.30)";  // faint gold flecks, far out
-      const pts = [[40,60],[980,90],[60,960],[990,940],[30,500],[1000,520],[500,25],[520,1000]];
-      for (const [x, y] of pts) { g.beginPath(); g.arc(x, y, 6, 0, Math.PI*2); g.fill(); }
+    g.fillRect(262, 200, 500, 620);
+    g.fillStyle = "rgba(220,120,180,0.85)";
+    for (const [x, y] of [[60,80],[960,110],[80,940],[970,930],[40,512],[990,500]]) {
+      g.beginPath(); g.arc(x, y, 22, 0, Math.PI*2); g.fill();
     }
-    return c.toDataURL("image/png");
+  }
+  const artImg = await load(c.toDataURL("image/png"));
+  const artA = analyzeArtwork(artImg);
+
+  const bg = document.createElement("canvas");
+  bg.width = 1200; bg.height = 1200;
+  { const g = bg.getContext("2d"); g.fillStyle = "#2b3a55"; g.fillRect(0,0,1200,1200); }
+  const bgImg = await load(bg.toDataURL("image/png"));
+
+  const placement = { centerX: 0.5, centerY: 0.45, width: 0.3, rotation: 0,
+                      opacity: 100, perspective: null };
+
+  const cv = document.createElement("canvas");
+  cv.width = 1200; cv.height = 1200;
+  const ctx = cv.getContext("2d", { willReadFrequently: true });
+  renderMockup(ctx, bgImg, artImg, artA, placement, { shading: false });
+
+  // Everything that is not the flat background counts as drawn ink.
+  const d = ctx.getImageData(0, 0, 1200, 1200).data;
+  let minX = 1e9, maxX = -1, minY = 1e9, maxY = -1;
+  for (let y = 0; y < 1200; y++) for (let x = 0; x < 1200; x++) {
+    const i = (y * 1200 + x) * 4;
+    const isBg = Math.abs(d[i]-0x2b) < 6 && Math.abs(d[i+1]-0x3a) < 6 && Math.abs(d[i+2]-0x55) < 6;
+    if (!isBg) { if (x<minX) minX=x; if (x>maxX) maxX=x; if (y<minY) minY=y; if (y>maxY) maxY=y; }
+  }
+
+  const h = deriveHeight(placement.width, artA.visibleAspect, 1);
+  const box = {
+    x0: (placement.centerX - placement.width/2) * 1200,
+    x1: (placement.centerX + placement.width/2) * 1200,
+    y0: (placement.centerY - h/2) * 1200,
+    y1: (placement.centerY + h/2) * 1200,
   };
 
-  const plain = analyzeArtwork(await load(mk(false)));
-  const confetti = analyzeArtwork(await load(mk(true)));
-
-  results.scatter = {
-    plainTrim: { w: +plain.trim.w.toFixed(4), h: +plain.trim.h.toFixed(4) },
-    confettiTrim: { w: +confetti.trim.w.toFixed(4), h: +confetti.trim.h.toFixed(4) },
-    plainAspect: +plain.visibleAspect.toFixed(4),
-    confettiAspect: +confetti.visibleAspect.toFixed(4),
-    // Solid content is 500x620 in a 1024 canvas.
-    expectedW: +(500 / 1024).toFixed(4),
-    expectedH: +(620 / 1024).toFixed(4),
+  results.overspill = {
+    drawn: { minX, maxX, minY, maxY },
+    box: { x0: Math.round(box.x0), x1: Math.round(box.x1),
+           y0: Math.round(box.y0), y1: Math.round(box.y1) },
+    // Positive = ink outside the placement box, in pixels.
+    worst: Math.round(Math.max(box.x0 - minX, maxX - box.x1, box.y0 - minY, maxY - box.y1)),
   };
 }
 
