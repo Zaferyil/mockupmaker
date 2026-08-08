@@ -453,6 +453,59 @@ const square = makeArtwork({ w: 800, h: 800 });
   };
 }
 
+// 13. preview and export must agree.
+//     The preview renders at a working resolution and the export at the
+//     mockup's full size. Both go through renderMockup, so the ink must land
+//     at the same *normalized* position in each — that is the property that
+//     broke repeatedly while the preview was drawn with CSS.
+{
+  const { renderMockup } = await import("/src/placement/compositor.js");
+
+  const ac = document.createElement("canvas");
+  ac.width = 900; ac.height = 700;
+  { const g = ac.getContext("2d");
+    g.clearRect(0,0,900,700);
+    // Asymmetric padding: ink occupies an off-centre patch of the canvas.
+    g.fillStyle = "#ff00ff"; g.fillRect(120, 90, 500, 400); }
+  const artImg = await load(ac.toDataURL("image/png"));
+  const artA = analyzeArtwork(artImg);
+
+  const bg = document.createElement("canvas");
+  bg.width = 1200; bg.height = 1500;
+  { const g = bg.getContext("2d"); g.fillStyle = "#334455"; g.fillRect(0,0,1200,1500); }
+  const bgImg = await load(bg.toDataURL("image/png"));
+
+  const placement = { centerX: 0.46, centerY: 0.38, width: 0.34, rotation: 0,
+                      opacity: 100, perspective: null };
+
+  const inkAt = (cw, ch) => {
+    const c = document.createElement("canvas");
+    c.width = cw; c.height = ch;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    renderMockup(ctx, bgImg, artImg, artA, placement, { shading: false });
+    const d = ctx.getImageData(0, 0, cw, ch).data;
+    let minX = 1e9, maxX = -1, minY = 1e9, maxY = -1;
+    for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
+      const i = (y * cw + x) * 4;
+      if (d[i] > 200 && d[i+1] < 60 && d[i+2] > 200) {
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+      }
+    }
+    if (maxX < 0) return null;
+    return {
+      cx: +(((minX + maxX) / 2) / cw).toFixed(4),
+      cy: +(((minY + maxY) / 2) / ch).toFixed(4),
+      w: +((maxX - minX + 1) / cw).toFixed(4),
+    };
+  };
+
+  // Preview resolution vs full export resolution.
+  const preview = inkAt(800, 1000);
+  const exported = inkAt(1200, 1500);
+  results.previewMatch = { preview, exported };
+}
+
 window.__RESULTS__ = results;
 document.title = "done";
 </script>

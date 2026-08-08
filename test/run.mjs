@@ -213,6 +213,16 @@ check(
   `top ${r.warp.topWidth}px / bottom ${r.warp.bottomWidth}px = ${r.warp.measuredTaper} (expected ${r.warp.expectedTaper})`,
 );
 
+const pm = r.previewMatch;
+check(
+  "preview and export place the ink identically",
+  pm.preview && pm.exported &&
+    Math.abs(pm.preview.cx - pm.exported.cx) < 0.005 &&
+    Math.abs(pm.preview.cy - pm.exported.cy) < 0.005 &&
+    Math.abs(pm.preview.w - pm.exported.w) < 0.005,
+  `preview ${JSON.stringify(pm.preview)} vs export ${JSON.stringify(pm.exported)}`,
+);
+
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}\n`);
 shutdown();
 process.exit(failures === 0 ? 0 : 1);

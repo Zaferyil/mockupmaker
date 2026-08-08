@@ -1390,6 +1390,7 @@ function resizeBox(start, mode, dxPct, dyPct) {
 function DesignPlacer({ designSrc, referenceSrc, tshirtColor, resolved, status, onChange }) {
   const containerRef = useRef(null);
   const dragRef = useRef(null);
+  const previewCanvasRef = useRef(null);
   const [refFailed, setRefFailed] = useState(false);
   const [liveBox, setLiveBox] = useState(null);
 
@@ -1401,6 +1402,52 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, resolved, status, 
   useEffect(() => {
     setLiveBox(null);
   }, [resolved?.placement]);
+
+  // Paint the preview through the export compositor.
+  //
+  // Dragging updates `liveBox` many times a second, so the placement fed to the
+  // renderer is rebuilt from that rather than from `resolved` — otherwise the
+  // photograph would lag a drag by a whole commit.
+  useEffect(() => {
+    const canvas = previewCanvasRef.current;
+    if (!canvas || !referenceSrc || !resolved) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const mockupImage = await loadImage(referenceSrc);
+        if (cancelled) return;
+
+        // Preview resolution: enough to judge placement, small enough that a
+        // drag stays responsive. The export still renders at full size.
+        const long = 1000;
+        const aspect = resolved.imageAspect;
+        canvas.width = aspect >= 1 ? long : Math.round(long * aspect);
+        canvas.height = aspect >= 1 ? Math.round(long / aspect) : long;
+        const ctx = canvas.getContext("2d");
+
+        const placement = liveBox
+          ? { ...fromBox(liveBox, "manual"), perspective: resolved.placement.perspective }
+          : resolved.placement;
+
+        if (!designSrc) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(mockupImage, 0, 0, canvas.width, canvas.height);
+          return;
+        }
+
+        const artworkImage = await loadImage(designSrc, false);
+        if (cancelled) return;
+        renderMockup(ctx, mockupImage, artworkImage, resolved.artwork, placement);
+      } catch {
+        if (!cancelled) setRefFailed(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [referenceSrc, designSrc, resolved, liveBox]);
 
   const box = useMemo(() => {
     if (liveBox) return liveBox;
@@ -1532,12 +1579,22 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, resolved, status, 
         aspectRatio: resolved ? String(resolved.imageAspect) : "1",
       }}
     >
+      {/*
+        The preview is drawn by the same compositor the export uses.
+
+        It used to be CSS: an <img> for the photograph and another for the
+        design, positioned by trim ratios that mirrored the canvas arithmetic.
+        Mirrored logic drifts — percentage lengths resolve against padding
+        boxes, borders participate in box sizing, object-fit has its own
+        rules — and every drift showed up as "the preview looks wrong but the
+        export is fine". Rendering both through renderMockup makes them the
+        same pixels by construction rather than by agreement, and it is what
+        will let the perspective warp be shown at all.
+      */}
       {referenceSrc && !refFailed ? (
-        <img
-          src={referenceSrc}
-          alt="mockup"
-          className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-          onError={() => setRefFailed(true)}
+        <canvas
+          ref={previewCanvasRef}
+          className="absolute inset-0 w-full h-full pointer-events-none"
         />
       ) : (
         <TShirtSilhouette color={tshirtColor} />
@@ -1590,30 +1647,6 @@ function DesignPlacer({ designSrc, referenceSrc, tshirtColor, resolved, status, 
             transform: box.rotation ? `rotate(${box.rotation}deg)` : undefined,
           }}
         >
-          {/*
-            The dashed box is the *visible ink* target, matching what the
-            exporter draws. object-contain would fit the whole PNG — padding
-            included — inside that box, so a design carrying 21% transparent
-            margin previewed noticeably smaller and off-centre relative to the
-            export, which scales the ink itself to the box.
-
-            Positioning the bitmap by its trim ratios is the same arithmetic
-            canvasRectForInk performs on the canvas, so preview and export now
-            agree pixel for pixel.
-          */}
-          <img
-            src={designSrc}
-            alt="design"
-            className="absolute pointer-events-none"
-            style={{
-              left: `${(-resolved.artwork.trim.x / resolved.artwork.trim.w) * 100}%`,
-              top: `${(-resolved.artwork.trim.y / resolved.artwork.trim.h) * 100}%`,
-              width: `${(1 / resolved.artwork.trim.w) * 100}%`,
-              height: `${(1 / resolved.artwork.trim.h) * 100}%`,
-              objectFit: "fill",
-              opacity: box.opacity / 100,
-            }}
-          />
           {HANDLES.map((h) => (
             <div
               key={h}
