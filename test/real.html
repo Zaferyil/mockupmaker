@@ -92,7 +92,17 @@ for (const name of FILES) {
         ctx.beginPath(); ctx.moveTo(0, y*H); ctx.lineTo(W, y*H); ctx.stroke();
       }
     }
-    cap.textContent = `${name} [${via}] cy=${chest.centerY.toFixed(3)} w=${placement.width.toFixed(3)} rot=${placement.rotation.toFixed(1)} ${chest.analysis.pose}`;
+    if (placement.perspective) {
+      const q = placement.perspective;
+      ctx.strokeStyle = "rgba(255,0,255,0.95)"; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(q[0]*W, q[1]*H);
+      ctx.lineTo(q[2]*W, q[3]*H);
+      ctx.lineTo(q[4]*W, q[5]*H);
+      ctx.lineTo(q[6]*W, q[7]*H);
+      ctx.closePath(); ctx.stroke();
+    }
+    cap.textContent = `${name} [${via}] ${placement.perspective ? "WARP" : "flat"} cy=${chest.centerY.toFixed(3)} w=${placement.width.toFixed(3)} ${chest.analysis.cameraAngle}`;
     rows.push({ name, via, cx:+placement.centerX.toFixed(3), cy:+placement.centerY.toFixed(3),
                 w:+placement.width.toFixed(3), rot:+placement.rotation.toFixed(1),
                 conf:+chest.confidence.toFixed(2),
@@ -100,7 +110,7 @@ for (const name of FILES) {
                 spanN: chest.landmarks.shoulderSpan!=null?+chest.landmarks.shoulderSpan.toFixed(4):null,
                 shMidY: chest.landmarks.shoulderMidY!=null?+chest.landmarks.shoulderMidY.toFixed(4):null,
                 torsoL: chest.landmarks.torsoLength!=null?+chest.landmarks.torsoLength.toFixed(4):null,
-                imgAspect:+imageAspect.toFixed(4) });
+                imgAspect:+imageAspect.toFixed(4), warp: !!placement.perspective });
   } catch (e) {
     cap.textContent = `${name}: ${e.message}`;
     rows.push({ name, error: e.message });

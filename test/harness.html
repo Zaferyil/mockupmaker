@@ -404,6 +404,55 @@ const square = makeArtwork({ w: 800, h: 800 });
   };
 }
 
+// 12. projective warp: a design rendered through a trapezoid must taper by the
+//     same ratio as the quad. Canvas 2D has no perspective transform, so this
+//     verifies the triangle-mesh homography actually reproduces one.
+{
+  const { renderMockup } = await import("/src/placement/compositor.js");
+
+  const ac = document.createElement("canvas");
+  ac.width = 600; ac.height = 600;
+  { const g = ac.getContext("2d"); g.clearRect(0,0,600,600);
+    g.fillStyle = "#ff00ff"; g.fillRect(0, 0, 600, 600); }
+  const artImg = await load(ac.toDataURL("image/png"));
+  const artA = analyzeArtwork(artImg);
+
+  const bg = document.createElement("canvas");
+  bg.width = 1000; bg.height = 1000;
+  { const g = bg.getContext("2d"); g.fillStyle = "#203040"; g.fillRect(0,0,1000,1000); }
+  const bgImg = await load(bg.toDataURL("image/png"));
+
+  // Trapezoid: top edge 400px, bottom edge 200px — a 2:1 taper.
+  const quad = [0.30, 0.30, 0.70, 0.30, 0.60, 0.70, 0.40, 0.70];
+  const placement = { centerX: 0.5, centerY: 0.5, width: 0.4, rotation: 0,
+                      opacity: 100, perspective: quad };
+
+  const cv = document.createElement("canvas");
+  cv.width = 1000; cv.height = 1000;
+  const ctx = cv.getContext("2d", { willReadFrequently: true });
+  renderMockup(ctx, bgImg, artImg, artA, placement, { shading: false });
+
+  const d = ctx.getImageData(0, 0, 1000, 1000).data;
+  const rowWidth = (y) => {
+    let min = 1e9, max = -1;
+    for (let x = 0; x < 1000; x++) {
+      const i = (y * 1000 + x) * 4;
+      if (d[i] > 200 && d[i+1] < 60 && d[i+2] > 200) { if (x < min) min = x; if (x > max) max = x; }
+    }
+    return max < 0 ? 0 : max - min + 1;
+  };
+  // Sample just inside the top and bottom edges.
+  const topW = rowWidth(310);
+  const botW = rowWidth(690);
+
+  results.warp = {
+    topWidth: topW,
+    bottomWidth: botW,
+    measuredTaper: botW > 0 ? +(topW / botW).toFixed(3) : null,
+    expectedTaper: 2.0,
+  };
+}
+
 window.__RESULTS__ = results;
 document.title = "done";
 </script>

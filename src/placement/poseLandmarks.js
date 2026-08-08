@@ -29,6 +29,7 @@
 
 import * as tf from "@tensorflow/tfjs";
 import * as poseDetection from "@tensorflow-models/pose-detection";
+import { mapRectIntoQuad, quadTaper } from "./homography.js";
 
 /**
  * Bring a usable TFJS backend up before any model touches a tensor.
@@ -82,6 +83,9 @@ const ROTATION_DEADZONE = 9;
 /** How much of the remaining tilt to actually apply. */
 const ROTATION_DAMPING = 0.5;
 const MAX_ROTATION = 6;
+
+/** Below this much taper the torso is effectively flat; skip the warp. */
+const MIN_TAPER = 0.03;
 
 let detectorPromise = null;
 let detectorKey = null;
@@ -210,13 +214,25 @@ export async function chestAreaFromPose(image, { modelUrl } = {}) {
     (lS.score + rS.score) / 2 * 0.6 + (lH && rH ? 0.4 : lH || rH ? 0.2 : 0.05),
   );
 
+  // ---- perspective -----------------------------------------------------
+  // Shoulders and hips bound the torso, and that quad is trapezoidal exactly
+  // when the body is turned: the near shoulder is closer to the lens, so it
+  // images wider than the far one. Nothing has to infer the camera angle — the
+  // shape of the quad *is* the measurement.
+  //
+  // The print rectangle is expressed in the torso's own flat coordinates and
+  // carried into the photograph by the quad's projective map, so it inherits
+  // whatever perspective the torso has.
+  const perspective =
+    lH && rH ? buildPrintQuad({ lS, rS, lH, rH }, shoulderSpan, printH, W, H) : null;
+
   return {
     centerX: centre.x / W,
     centerY: centre.y / H,
     width: printW / W,
     height: printH / H,
     rotation,
-    perspective: null,
+    perspective,
     confidence,
     landmarks: {
       shoulderSpan: shoulderSpan / W,
@@ -233,6 +249,83 @@ export async function chestAreaFromPose(image, { modelUrl } = {}) {
       collarDetected: true,
     },
   };
+}
+
+/**
+ * The print area as a quad that follows the torso's perspective.
+ *
+ * Returns normalized image coordinates as [x0,y0,x1,y1,x2,y2,x3,y3], corners
+ * clockwise from top-left, or null when the torso is too close to flat to be
+ * worth warping — below the taper gate the quad is noise and warping would
+ * cost sharpness for nothing.
+ */
+function buildPrintQuad({ lS, rS, lH, rH }, shoulderSpan, printH, W, H) {
+  // Order by image x, not by anatomical side: for a frontal subject the
+  // model's left shoulder sits on the image right, and a turned or mirrored
+  // shot can swap them again.
+  const shoulderLeft = lS.x <= rS.x ? lS : rS;
+  const shoulderRight = lS.x <= rS.x ? rS : lS;
+  const hipLeft = lH.x <= rH.x ? lH : rH;
+  const hipRight = lH.x <= rH.x ? rH : lH;
+
+  // Separate perspective from anatomy before building the quad.
+  //
+  // Shoulders are wider than hips on everyone, so the raw shoulder→hip quad is
+  // a trapezoid even for a subject facing straight at the lens. Warping on that
+  // taper skews the print for a reason that has nothing to do with the camera —
+  // and a t-shirt's side seams hang close to vertical regardless of the body
+  // narrowing underneath.
+  //
+  // The perspective signal is the *asymmetry* between the two sides: when a
+  // torso turns, the near half foreshortens less than the far half. Dividing
+  // out the symmetric component leaves exactly that.
+  const shoulderMidPt = { x: (lS.x + rS.x) / 2, y: (lS.y + rS.y) / 2 };
+  const hipMidPt = { x: (lH.x + rH.x) / 2, y: (lH.y + rH.y) / 2 };
+
+  const halfLeftS = Math.abs(shoulderLeft.x - shoulderMidPt.x);
+  const halfRightS = Math.abs(shoulderRight.x - shoulderMidPt.x);
+  const halfLeftH = Math.abs(hipLeft.x - hipMidPt.x);
+  const halfRightH = Math.abs(hipRight.x - hipMidPt.x);
+  if (halfLeftS < 1 || halfRightS < 1) return null;
+
+  // Symmetric narrowing = anatomy. Divide it out.
+  const anatomical = (halfLeftH + halfRightH) / (halfLeftS + halfRightS);
+  if (!(anatomical > 0.05)) return null;
+
+  const skewLeft = halfLeftH / (anatomical * halfLeftS);
+  const skewRight = halfRightH / (anatomical * halfRightS);
+
+  // Bottom edge: the shoulder line carried down the torso axis, keeping each
+  // side's own foreshortening but none of the body's taper.
+  const axisX = hipMidPt.x - shoulderMidPt.x;
+  const axisY = hipMidPt.y - shoulderMidPt.y;
+
+  const torso = [
+    [shoulderLeft.x, shoulderLeft.y],
+    [shoulderRight.x, shoulderRight.y],
+    [shoulderRight.x + axisX + (halfRightS * (skewRight - 1)), shoulderRight.y + axisY],
+    [shoulderLeft.x + axisX - (halfLeftS * (skewLeft - 1)), shoulderLeft.y + axisY],
+  ];
+
+  if (quadTaper(torso) < MIN_TAPER) return null;
+
+  // Torso-local space: u across the shoulder line, v from shoulders to hips.
+  const torsoLength = Math.hypot(axisX, axisY);
+  if (torsoLength < 1) return null;
+
+  const vTop = (shoulderSpan * TOP_BELOW_SHOULDER) / torsoLength;
+  const vHeight = printH / torsoLength;
+  if (vTop + vHeight > 1.15) return null; // print would run past the hips
+
+  const mapped = mapRectIntoQuad(torso, {
+    x: (1 - PRINT_WIDTH) / 2,
+    y: vTop,
+    w: PRINT_WIDTH,
+    h: vHeight,
+  });
+  if (!mapped) return null;
+
+  return mapped.flatMap(([x, y]) => [x / W, y / H]);
 }
 
 /**

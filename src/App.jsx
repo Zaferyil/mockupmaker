@@ -23,6 +23,7 @@ import {
   importPlacements,
   fromLegacy,
   resolvePlacement,
+  forgetTemplateMeasurement,
   loadImage,
   toBox,
   fromBox,
@@ -257,6 +258,8 @@ function MockupStudio() {
   // button after fixing a placement always repaints — rather than doing
   // nothing visible because `generated` was already true.
   const [generationId, setGenerationId] = useState(0);
+  // Bumped to force the resolver to run again after locks are cleared.
+  const [resolveNonce, setResolveNonce] = useState(0);
   const [zipStatus, setZipStatus] = useState("idle"); // idle | zipping | error
 
   // R2 bucket'ındaki gerçek mockup dosyalarının canlı listesi
@@ -497,7 +500,7 @@ function MockupStudio() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [designImg, entriesSignature]);
+  }, [designImg, entriesSignature, resolveNonce]);
 
   const activeResolved = activeEntryKey ? resolved[activeEntryKey] : null;
 
@@ -548,6 +551,33 @@ function MockupStudio() {
   function runGenerate() {
     setGenerated(true);
     setGenerationId((n) => n + 1);
+  }
+
+  /**
+   * Throw away what we know about the selected mockups and measure them again.
+   *
+   * Pressing Generate a second time only ever repainted, which looked like a
+   * dead button: the results are already live, so redrawing produced pixel-
+   * identical output. The only thing that can visibly change a finished mockup
+   * is re-running detection, so that is what this does — it clears the locks
+   * and the cached geometry for the selected templates and lets the pipeline
+   * measure from scratch.
+   *
+   * Hand calibration is discarded for those templates, which is the point:
+   * this is the escape hatch back to automatic placement.
+   */
+  function reAutoPlace() {
+    for (const key of selectedKeys) {
+      locksRef.current.clear(key);
+      forgetTemplateMeasurement(key);
+      markDirty(key);
+    }
+    setResolved((prev) => {
+      const next = { ...prev };
+      for (const key of selectedKeys) delete next[key];
+      return next;
+    });
+    setResolveNonce((n) => n + 1);
   }
 
   /**
@@ -1046,12 +1076,13 @@ function MockupStudio() {
                   {/* Reachable from the results themselves — spotting a bad
                       placement here shouldn't mean scrolling back up. */}
                   <button
-                    onClick={runGenerate}
+                    onClick={reAutoPlace}
+                    title="Discard manual adjustments on the selected mockups and detect placement again"
                     className="flex items-center gap-1.5 text-xs font-body font-semibold rounded-full px-3 py-1.5 border transition hover:bg-gray-50"
                     style={{ borderColor: ACCENT.violet, color: ACCENT.violet }}
                   >
                     <Sparkles className="w-3 h-3" />
-                    Regenerate
+                    Auto-place again
                   </button>
                 <button
                   onClick={handleDownloadAll}

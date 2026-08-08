@@ -207,6 +207,12 @@ check(
   `plain ${sc.plainAspect} vs confetti ${sc.confettiAspect} (trim ${sc.confettiTrim.w}x${sc.confettiTrim.h})`,
 );
 
+check(
+  "projective warp reproduces the quad's taper",
+  r.warp.measuredTaper !== null && Math.abs(r.warp.measuredTaper - r.warp.expectedTaper) < 0.08,
+  `top ${r.warp.topWidth}px / bottom ${r.warp.bottomWidth}px = ${r.warp.measuredTaper} (expected ${r.warp.expectedTaper})`,
+);
+
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}\n`);
 shutdown();
 process.exit(failures === 0 ? 0 : 1);

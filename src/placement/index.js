@@ -49,6 +49,17 @@ export function clearPlacementCaches() {
   imageCache.clear();
 }
 
+/**
+ * Drop one template's cached measurement so the next resolve measures it again.
+ *
+ * The cache is what makes repeat renders identical, so it deliberately never
+ * expires on its own. Re-running detection therefore has to ask explicitly.
+ * The decoded image stays cached; only the geometry is forgotten.
+ */
+export function forgetTemplateMeasurement(templateId) {
+  chestCache.delete(templateId);
+}
+
 function loadModel() {
   if (!modelPromise) {
     modelPromise = cocoSsd.load().catch((err) => {

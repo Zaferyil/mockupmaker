@@ -20,10 +20,14 @@
 // field with the colour removed, so folds transfer and hue does not.
 
 import { canvasRectForInk } from "./artwork.js";
+import { unitSquareTo, project } from "./homography.js";
 import { deriveHeight } from "./contract.js";
 
-/** Horizontal slices used to fake a homography. More slices = smoother taper. */
-const WARP_SLICES = 72;
+/** Grid subdivision for the projective warp. Error falls off quadratically,
+ *  so 16 is already sub-pixel for the tapers a garment presents. */
+const WARP_GRID = 16;
+/** Outward expansion of each triangle's clip, in pixels, to hide seams. */
+const SEAM_OVERLAP = 0.5;
 /** How strongly fabric shading shows through the print. */
 const SHADING_STRENGTH = 0.55;
 
@@ -41,6 +45,17 @@ export function inkRectFor(placement, artwork, canvasWidth, canvasHeight) {
     w,
     h: hp,
   };
+}
+
+/** Axis-aligned bounds of a normalized quad, in canvas pixels. */
+function quadBounds(quadNorm, canvasWidth, canvasHeight) {
+  const xs = [quadNorm[0], quadNorm[2], quadNorm[4], quadNorm[6]].map((v) => v * canvasWidth);
+  const ys = [quadNorm[1], quadNorm[3], quadNorm[5], quadNorm[7]].map((v) => v * canvasHeight);
+  const x0 = Math.max(0, Math.floor(Math.min(...xs)) - 1);
+  const y0 = Math.max(0, Math.floor(Math.min(...ys)) - 1);
+  const x1 = Math.min(canvasWidth, Math.ceil(Math.max(...xs)) + 1);
+  const y1 = Math.min(canvasHeight, Math.ceil(Math.max(...ys)) + 1);
+  return { x: x0, y: y0, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0) };
 }
 
 /** Axis-aligned bounds of a rect rotated about its own centre, clamped to the canvas. */
@@ -87,7 +102,13 @@ function renderArtworkLayer(artworkImage, artwork, placement, canvasWidth, canva
   // than the ink target and offset — otherwise the design lands small and
   // off-centre by half the padding asymmetry.
   const full = canvasRectForInk(artwork, ink);
-  const bounds = rotatedBounds(full, placement.rotation, canvasWidth, canvasHeight);
+
+  // A warped print lands inside its quad, which can reach well outside the
+  // upright rectangle — so the layer has to be sized from whichever the
+  // artwork will actually occupy, or the warp gets clipped.
+  const bounds = placement.perspective
+    ? quadBounds(placement.perspective, canvasWidth, canvasHeight)
+    : rotatedBounds(full, placement.rotation, canvasWidth, canvasHeight);
   if (bounds.w < 1 || bounds.h < 1) return null;
 
   const layer = document.createElement("canvas");
@@ -98,17 +119,18 @@ function renderArtworkLayer(artworkImage, artwork, placement, canvasWidth, canva
   // Work in full-canvas coordinates, offset into the layer.
   lctx.translate(-bounds.x, -bounds.y);
 
-  if (placement.rotation) {
-    const cx = ink.x + ink.w / 2;
-    const cy = ink.y + ink.h / 2;
-    lctx.translate(cx, cy);
-    lctx.rotate((placement.rotation * Math.PI) / 180);
-    lctx.translate(-cx, -cy);
-  }
-
   if (placement.perspective) {
-    drawWarped(lctx, artworkImage, full, placement.perspective, canvasWidth, canvasHeight, ink);
+    // The quad already encodes orientation and taper together — applying
+    // `rotation` as well would count the tilt twice.
+    drawWarped(lctx, artworkImage, artwork, placement.perspective, canvasWidth, canvasHeight);
   } else {
+    if (placement.rotation) {
+      const cx = ink.x + ink.w / 2;
+      const cy = ink.y + ink.h / 2;
+      lctx.translate(cx, cy);
+      lctx.rotate((placement.rotation * Math.PI) / 180);
+      lctx.translate(-cx, -cy);
+    }
     lctx.drawImage(artworkImage, full.x, full.y, full.w, full.h);
   }
 
@@ -116,71 +138,121 @@ function renderArtworkLayer(artworkImage, artwork, placement, canvasWidth, canva
 }
 
 /**
- * Approximate a homography with horizontal slices.
+ * Warp the artwork onto a quadrilateral through a true projective transform.
  *
- * Canvas 2D has no perspective transform. Slicing the image and giving each
- * slice its own affine scale reproduces a trapezoid to well under a pixel at
- * this slice count, which is all the taper a garment silhouette ever shows.
+ * Canvas 2D offers only affine transforms, which cannot make parallel lines
+ * converge — so a perspective warp has to be assembled from affine pieces. The
+ * surface is subdivided into a grid, each cell's corners are carried through
+ * the homography, and each resulting triangle is drawn with the affine map that
+ * takes its source triangle onto it. Affine interpolation is exact *within* a
+ * triangle, so the only error is the projective curvature across one cell, and
+ * that falls off quadratically with subdivision.
+ *
+ * The previous implementation scaled horizontal slices independently. That
+ * reproduced a symmetric trapezoid but nothing else: it could not shear, could
+ * not handle a quad whose verticals are not parallel, and ignored the corner
+ * positions entirely. A turned torso needs all three.
  */
-function drawWarped(ctx, image, full, quad, canvasWidth, canvasHeight, ink) {
-  const [ltx, lty, rtx, , rbx, rby, lbx] = [
-    quad[0] * canvasWidth,
-    quad[1] * canvasHeight,
-    quad[2] * canvasWidth,
-    quad[3] * canvasHeight,
-    quad[4] * canvasWidth,
-    quad[5] * canvasHeight,
-    quad[6] * canvasWidth,
-    quad[7] * canvasHeight,
+function drawWarped(ctx, image, artwork, quadNorm, canvasWidth, canvasHeight) {
+  const quad = [
+    [quadNorm[0] * canvasWidth, quadNorm[1] * canvasHeight],
+    [quadNorm[2] * canvasWidth, quadNorm[3] * canvasHeight],
+    [quadNorm[4] * canvasWidth, quadNorm[5] * canvasHeight],
+    [quadNorm[6] * canvasWidth, quadNorm[7] * canvasHeight],
   ];
 
-  const topWidth = rtx - ltx;
-  const bottomWidth = rbx - lbx;
-  if (!(topWidth > 0) || !(bottomWidth > 0)) {
-    ctx.drawImage(image, full.x, full.y, full.w, full.h);
-    return;
-  }
+  const H = unitSquareTo(quad);
+  if (!H) return false;
 
-  // Express the taper relative to the band, then apply it to the artwork rect
-  // so the warp scales with the print rather than with the garment.
-  const bandTop = lty;
-  const bandHeight = rby - lty || 1;
-  const sh = image.naturalHeight || image.height;
   const sw = image.naturalWidth || image.width;
+  const sh = image.naturalHeight || image.height;
 
-  for (let i = 0; i < WARP_SLICES; i++) {
-    const t0 = i / WARP_SLICES;
-    const t1 = (i + 1) / WARP_SLICES;
+  // Source-side trim: the quad describes where the *ink* goes, so the
+  // transparent padding around it must be excluded rather than warped in.
+  const t = artwork.trim;
+  const sx0 = t.x * sw;
+  const sy0 = t.y * sh;
+  const sW = t.w * sw;
+  const sH = t.h * sh;
+  if (sW < 1 || sH < 1) return false;
 
-    const destY0 = full.y + full.h * t0;
-    const destY1 = full.y + full.h * t1;
-
-    // Where this slice sits within the garment band, so the correct local
-    // taper is sampled even if the print does not fill the band.
-    const bandT = Math.min(1, Math.max(0, (destY0 - bandTop) / bandHeight));
-    const scale = lerp(topWidth, bottomWidth, bandT) / topWidth;
-
-    const centerX = full.x + full.w / 2;
-    const sliceW = full.w * scale;
-    const destX = centerX - sliceW / 2;
-
-    ctx.drawImage(
-      image,
-      0,
-      sh * t0,
-      sw,
-      Math.max(1, sh * (t1 - t0)),
-      destX,
-      destY0,
-      sliceW,
-      // +0.5px overlap kills seam lines between slices.
-      Math.max(1, destY1 - destY0 + 0.5),
-    );
+  // Project the grid once; every triangle reads from this.
+  const pts = [];
+  for (let j = 0; j <= WARP_GRID; j++) {
+    for (let i = 0; i <= WARP_GRID; i++) {
+      const u = i / WARP_GRID;
+      const v = j / WARP_GRID;
+      pts.push({ u, v, p: project(H, u, v) });
+    }
   }
-  void ink;
+  const at = (i, j) => pts[j * (WARP_GRID + 1) + i];
+
+  for (let j = 0; j < WARP_GRID; j++) {
+    for (let i = 0; i < WARP_GRID; i++) {
+      const a = at(i, j);
+      const b = at(i + 1, j);
+      const c = at(i + 1, j + 1);
+      const d = at(i, j + 1);
+      drawTriangle(ctx, image, sx0, sy0, sW, sH, a, b, c);
+      drawTriangle(ctx, image, sx0, sy0, sW, sH, a, c, d);
+    }
+  }
+  return true;
 }
 
-const lerp = (a, b, t) => a + (b - a) * t;
+/**
+ * Draw one source triangle onto one destination triangle.
+ *
+ * Solves the affine map taking the three source corners onto the destination
+ * corners, clips to the destination triangle, and lets drawImage fill it. The
+ * clip is expanded by a hair so neighbouring triangles overlap slightly —
+ * without it, antialiasing along shared edges leaves visible seams.
+ */
+function drawTriangle(ctx, image, sx0, sy0, sW, sH, A, B, C) {
+  const x0 = sx0 + A.u * sW;
+  const y0 = sy0 + A.v * sH;
+  const x1 = sx0 + B.u * sW;
+  const y1 = sy0 + B.v * sH;
+  const x2 = sx0 + C.u * sW;
+  const y2 = sy0 + C.v * sH;
+
+  const [u0, v0] = A.p;
+  const [u1, v1] = B.p;
+  const [u2, v2] = C.p;
+
+  const det = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
+  if (Math.abs(det) < 1e-9) return;
+
+  const a = ((u1 - u0) * (y2 - y0) - (u2 - u0) * (y1 - y0)) / det;
+  const b = ((u2 - u0) * (x1 - x0) - (u1 - u0) * (x2 - x0)) / det;
+  const c = ((v1 - v0) * (y2 - y0) - (v2 - v0) * (y1 - y0)) / det;
+  const d = ((v2 - v0) * (x1 - x0) - (v1 - v0) * (x2 - x0)) / det;
+  const e = u0 - a * x0 - b * y0;
+  const f = v0 - c * x0 - d * y0;
+
+  ctx.save();
+  ctx.beginPath();
+  const cx = (u0 + u1 + u2) / 3;
+  const cy = (v0 + v1 + v2) / 3;
+  const grow = (px, py) => {
+    const dx = px - cx;
+    const dy = py - cy;
+    const len = Math.hypot(dx, dy) || 1;
+    return [px + (dx / len) * SEAM_OVERLAP, py + (dy / len) * SEAM_OVERLAP];
+  };
+  const [gx0, gy0] = grow(u0, v0);
+  const [gx1, gy1] = grow(u1, v1);
+  const [gx2, gy2] = grow(u2, v2);
+  ctx.moveTo(gx0, gy0);
+  ctx.lineTo(gx1, gy1);
+  ctx.lineTo(gx2, gy2);
+  ctx.closePath();
+  ctx.clip();
+  ctx.transform(a, c, b, d, e, f);
+  ctx.drawImage(image, 0, 0);
+  ctx.restore();
+}
+
 
 /**
  * Transfer the garment's shading onto the printed pixels — and only those.
