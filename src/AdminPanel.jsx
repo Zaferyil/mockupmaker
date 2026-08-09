@@ -9,7 +9,68 @@ const ACCENT = {
   yellow: "#FFC93C",
 };
 
-export function AdminPanel({ onClose }) {
+// Kept here rather than imported from App.jsx: AdminPanel is imported *by*
+// App.jsx, so pulling the studio's dictionary back in would close an import
+// cycle. These strings are only ever used by this panel.
+const T = {
+  en: {
+    title: "Admin Panel — User Management",
+    addUser: "Add New User",
+    email: "Email",
+    emailPlaceholder: "name@email.com",
+    fullName: "Full Name",
+    namePlaceholder: "Customer name",
+    password: "Password",
+    submit: "Add User",
+    registered: "Registered Users",
+    delete: "Delete",
+    needEmailAndName: "Email and name are required",
+    alreadyRegistered: "That email is already registered",
+    added: (n) => `${n} added successfully!`,
+    removed: (e) => `${e} removed`,
+    confirmDelete: (e) => `Delete the user ${e}?`,
+    close: "Close",
+  },
+  tr: {
+    title: "Admin Paneli — Kullanıcı Yönetimi",
+    addUser: "Yeni Kullanıcı Ekle",
+    email: "Email",
+    emailPlaceholder: "ornek@email.com",
+    fullName: "Ad Soyad",
+    namePlaceholder: "Müşteri Adı",
+    password: "Şifre",
+    submit: "Kullanıcı Ekle",
+    registered: "Kayıtlı Kullanıcılar",
+    delete: "Sil",
+    needEmailAndName: "Email ve ad gerekli",
+    alreadyRegistered: "Bu email zaten kayıtlı",
+    added: (n) => `${n} başarıyla eklendi!`,
+    removed: (e) => `${e} silindi`,
+    confirmDelete: (e) => `${e} kullanıcısını silmek istediğine emin misin?`,
+    close: "Kapat",
+  },
+  de: {
+    title: "Admin-Panel — Benutzerverwaltung",
+    addUser: "Neuen Benutzer anlegen",
+    email: "E-Mail",
+    emailPlaceholder: "name@email.com",
+    fullName: "Name",
+    namePlaceholder: "Name des Kunden",
+    password: "Passwort",
+    submit: "Benutzer anlegen",
+    registered: "Registrierte Benutzer",
+    delete: "Löschen",
+    needEmailAndName: "E-Mail und Name sind erforderlich",
+    alreadyRegistered: "Diese E-Mail ist bereits registriert",
+    added: (n) => `${n} wurde angelegt!`,
+    removed: (e) => `${e} wurde gelöscht`,
+    confirmDelete: (e) => `Benutzer ${e} wirklich löschen?`,
+    close: "Schließen",
+  },
+};
+
+export function AdminPanel({ onClose, lang = "en" }) {
+  const t = T[lang] ?? T.en;
   const [users, setUsers] = useState(getAllUsers());
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -23,18 +84,18 @@ export function AdminPanel({ onClose }) {
     setSuccess("");
 
     if (!email || !name) {
-      setError("Email ve ad gerekli");
+      setError(t.needEmailAndName);
       return;
     }
 
     if (USERS[email]) {
-      setError("Bu email zaten kayıtlı");
+      setError(t.alreadyRegistered);
       return;
     }
 
     addUser(email, name, password);
     setUsers(getAllUsers());
-    setSuccess(`${name} başarıyla eklendi!`);
+    setSuccess(t.added(name));
     setEmail("");
     setName("");
     setPassword("password123");
@@ -44,13 +105,11 @@ export function AdminPanel({ onClose }) {
 
   const handleDeleteUser = (userEmail) => {
     if (
-      window.confirm(
-        `${userEmail} kullanıcısını silmek istediğine emin misin?`
-      )
+      window.confirm(t.confirmDelete(userEmail))
     ) {
       removeUser(userEmail);
       setUsers(getAllUsers());
-      setSuccess(`${userEmail} silindi`);
+      setSuccess(t.removed(userEmail));
       setTimeout(() => setSuccess(""), 3000);
     }
   };
@@ -98,7 +157,7 @@ export function AdminPanel({ onClose }) {
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             <Users size={24} />
             <h2 style={{ margin: 0, fontSize: "20px", fontWeight: "600" }}>
-              Admin Paneli - Kullanıcı Yönetimi
+              {t.title}
             </h2>
           </div>
           <button
@@ -115,7 +174,7 @@ export function AdminPanel({ onClose }) {
               justifyContent: "center",
             }}
           >
-            <X size={20} />
+            <X size={20} aria-label={t.close} />
           </button>
         </div>
 
@@ -132,7 +191,7 @@ export function AdminPanel({ onClose }) {
             }}
           >
             <h3 style={{ margin: "0 0 16px 0", color: "#1f2937" }}>
-              Yeni Kullanıcı Ekle
+              {t.addUser}
             </h3>
 
             <form onSubmit={handleAddUser}>
@@ -147,13 +206,13 @@ export function AdminPanel({ onClose }) {
                     color: "#374151",
                   }}
                 >
-                  Email
+                  {t.email}
                 </label>
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="ornek@email.com"
+                  placeholder={t.emailPlaceholder}
                   style={{
                     width: "100%",
                     padding: "8px 12px",
@@ -179,13 +238,13 @@ export function AdminPanel({ onClose }) {
                     color: "#374151",
                   }}
                 >
-                  Ad Soyad
+                  {t.fullName}
                 </label>
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Müşteri Adı"
+                  placeholder={t.namePlaceholder}
                   style={{
                     width: "100%",
                     padding: "8px 12px",
@@ -211,7 +270,7 @@ export function AdminPanel({ onClose }) {
                     color: "#374151",
                   }}
                 >
-                  Şifre
+                  {t.password}
                 </label>
                 <input
                   type="text"
@@ -286,7 +345,7 @@ export function AdminPanel({ onClose }) {
                 }}
               >
                 <Plus size={16} />
-                Kullanıcı Ekle
+                {t.submit}
               </button>
             </form>
           </div>
@@ -294,7 +353,7 @@ export function AdminPanel({ onClose }) {
           {/* Users List */}
           <div>
             <h3 style={{ margin: "0 0 12px 0", color: "#1f2937" }}>
-              Kayıtlı Kullanıcılar ({users.length})
+              {t.registered} ({users.length})
             </h3>
 
             <div
@@ -376,7 +435,7 @@ export function AdminPanel({ onClose }) {
                       }}
                     >
                       <Trash2 size={14} />
-                      Sil
+                      {t.delete}
                     </button>
                   )}
                 </div>

@@ -91,6 +91,14 @@ const LANGS = [
   { id: "en", label: "EN" },
 ];
 
+// Labels for the authenticated shell around the studio (header + admin
+// entry point). Separate from the studio dictionary because App renders them.
+const SHELL_T = {
+  en: { adminPanel: "Admin Panel", logout: "Logout" },
+  tr: { adminPanel: "Admin Paneli", logout: "Çıkış" },
+  de: { adminPanel: "Admin-Panel", logout: "Abmelden" },
+};
+
 const T = {
   tr: {
     brand: "MockUP Maker",
@@ -250,8 +258,9 @@ function readFileAsDataURL(file) {
   });
 }
 
-function MockupStudio() {
-  const [lang, setLang] = useState("en");
+// The language is owned by App rather than by the studio, because the admin
+// panel lives outside the studio and has to follow the same switch.
+function MockupStudio({ lang, setLang }) {
   const [langOpen, setLangOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
 
@@ -2260,6 +2269,10 @@ const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, folder
 export default function App() {
   const [currentUser, setCurrentUser] = useState(() => getCurrentUser());
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
+  // English by default; the picker in the studio header changes it for the
+  // whole application, admin panel included.
+  const [lang, setLang] = useState("en");
+  const shell = SHELL_T[lang] ?? SHELL_T.en;
 
   if (!currentUser) {
     return (
@@ -2333,7 +2346,7 @@ export default function App() {
                 e.target.style.background = "rgba(255,255,255,0.15)";
               }}
             >
-              ⚙️ Admin Panel
+              {`⚙️ ${shell.adminPanel}`}
             </button>
           )}
           <button
@@ -2360,16 +2373,18 @@ export default function App() {
             }}
           >
             <LogOut size={16} />
-            Logout
+            {shell.logout}
           </button>
         </div>
       </div>
 
       {/* Admin Panel Modal */}
-      {adminPanelOpen && <AdminPanel onClose={() => setAdminPanelOpen(false)} />}
+      {adminPanelOpen && (
+        <AdminPanel lang={lang} onClose={() => setAdminPanelOpen(false)} />
+      )}
 
       {/* Main App */}
-      <MockupStudio />
+      <MockupStudio lang={lang} setLang={setLang} />
     </div>
   );
 }
