@@ -126,6 +126,8 @@ const T = {
     placementSaveError: "Konum kaydedilemedi, sadece bu oturumda geçerli olacak",
     opacity: "Opaklık",
     download: "İndir",
+    enlarge: "Büyüt",
+    zoomHint: "Detay için imleci görselin üzerinde gezdir · ← → ile gez · ESC kapatır",
     downloadAll: "Tümünü İndir (ZIP)",
     zippingAll: "ZIP hazırlanıyor…",
     zipError: "ZIP oluşturulamadı, tek tek indirmeyi dene",
@@ -168,6 +170,8 @@ const T = {
     placementSaveError: "Position konnte nicht gespeichert werden, gilt nur für diese Sitzung",
     opacity: "Deckkraft",
     download: "Herunterladen",
+    enlarge: "Vergrößern",
+    zoomHint: "Zum Vergrößern über das Bild fahren · ← → blättern · ESC schließt",
     downloadAll: "Alle herunterladen (ZIP)",
     zippingAll: "ZIP wird erstellt…",
     zipError: "ZIP konnte nicht erstellt werden, einzeln herunterladen",
@@ -210,6 +214,8 @@ const T = {
     placementSaveError: "Couldn't save position, only applies to this session",
     opacity: "Opacity",
     download: "Download",
+    enlarge: "Enlarge",
+    zoomHint: "Hover the image to magnify · ← → to browse · ESC to close",
     downloadAll: "Download All (ZIP)",
     zippingAll: "Zipping…",
     zipError: "Couldn't build the ZIP, try downloading individually",
@@ -262,6 +268,10 @@ function MockupStudio() {
   // Bumped to force the resolver to run again after locks are cleared.
   const [resolveNonce, setResolveNonce] = useState(0);
   const [zipStatus, setZipStatus] = useState("idle"); // idle | zipping | error
+  // Which result is open in the full-size viewer, by file key. Stored as a key
+  // rather than an index so re-ordering or re-generating the grid cannot leave
+  // the viewer pointing at a different mockup than the one that was clicked.
+  const [lightboxKey, setLightboxKey] = useState(null);
 
   // R2 bucket'ındaki gerçek mockup dosyalarının canlı listesi
   const [r2Status, setR2Status] = useState(R2_LIST_URL ? "loading" : "unconfigured");
@@ -1115,6 +1125,7 @@ function MockupStudio() {
                     designSrc={designImg}
                     resolved={resolved[e.key]}
                     generationId={generationId}
+                    onOpen={() => setLightboxKey(e.key)}
                     t={t}
                   />
                 ))}
@@ -1123,6 +1134,17 @@ function MockupStudio() {
           </div>
         )}
       </div>
+
+      {lightboxKey && (
+        <ResultLightbox
+          entries={entries}
+          activeKey={lightboxKey}
+          onNavigate={setLightboxKey}
+          onClose={() => setLightboxKey(null)}
+          previewRefs={previewRefs}
+          t={t}
+        />
+      )}
 
       {/* Bottom Navigation - Mobile Only */}
       <div className="sm:hidden fixed bottom-0 inset-x-0 bg-white border-t border-gray-200">
@@ -1760,21 +1782,179 @@ function PlacementReport({ resolved }) {
 }
 
 /**
- * How far the inspect-on-hover zoom magnifies.
+ * How far the viewer's magnifier goes past fit-to-screen.
  *
- * The canvas is composited at the mockup's full resolution and only CSS-scaled
- * down to thumbnail size, so magnifying it reveals real pixels rather than an
- * upscale. A 4000px source in a ~250px tile is displayed at roughly 6% — 3x is
- * a useful look at the print edge while staying far inside the native detail.
+ * The canvas is composited at the mockup's full resolution and only scaled down
+ * for display, so magnifying reveals real pixels rather than an upscale. Fitted
+ * to the viewport a 4000px mockup already shows at roughly 20%, so 3x lands
+ * near 60% of native — a close look at the print edge with detail to spare.
  */
 const ZOOM_FACTOR = 3;
 
-const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockupSrc, designSrc, resolved, generationId, t }, ref) {
+/**
+ * Full-size viewer for one generated mockup.
+ *
+ * The pixels come from the tile's own canvas rather than being re-composited,
+ * so what is inspected is provably the same image that downloads — the viewer
+ * cannot drift from the export the way a second render path would.
+ */
+function ResultLightbox({ entries, activeKey, onNavigate, onClose, previewRefs, t }) {
+  const index = entries.findIndex((e) => e.key === activeKey);
+  const entry = index >= 0 ? entries[index] : null;
+  const [src, setSrc] = useState(null);
+  const [zoomAt, setZoomAt] = useState(null);
+
+  const step = (delta) => {
+    if (entries.length < 2) return;
+    onNavigate(entries[(index + delta + entries.length) % entries.length].key);
+  };
+
+  // Pull the rendered bitmap out of the tile that is already holding it.
+  useEffect(() => {
+    if (!entry) return;
+    let url = null;
+    let cancelled = false;
+    setSrc(null);
+    setZoomAt(null);
+    const handle = previewRefs.current.get(entry.key);
+    if (!handle) return;
+    handle.getBlob().then((blob) => {
+      if (cancelled || !blob) return;
+      url = URL.createObjectURL(blob);
+      setSrc(url);
+    });
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [entry, previewRefs]);
+
+  // No dependency list: the handler closes over the current index, and
+  // re-binding a single listener per render is cheaper than the bookkeeping
+  // needed to avoid it.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowRight") step(1);
+      else if (e.key === "ArrowLeft") step(-1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  // The page behind must not scroll away under the overlay. Kept in its own
+  // effect so the original value is captured once, on open.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  if (!entry) return null;
+
+  const track = (clientX, clientY, el) => {
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    setZoomAt({
+      x: Math.min(100, Math.max(0, ((clientX - r.left) / r.width) * 100)),
+      y: Math.min(100, Math.max(0, ((clientY - r.top) / r.height) * 100)),
+    });
+  };
+
+  const navBtn = "absolute top-1/2 -translate-y-1/2 w-10 h-10 rounded-full flex items-center justify-center text-white text-2xl font-body transition";
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center p-3 sm:p-6"
+      style={{ backgroundColor: "rgba(9,10,16,0.92)" }}
+      onClick={onClose}
+    >
+      <div className="w-full flex items-center justify-between gap-3 mb-3 shrink-0" onClick={(e) => e.stopPropagation()}>
+        <div className="min-w-0">
+          <p className="font-display font-semibold text-sm sm:text-base text-white truncate">{entry.label}</p>
+          <p className="font-mono2 text-[10px] text-white/50">
+            {index + 1} / {entries.length} · {t.zoomHint}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => previewRefs.current.get(entry.key)?.download()}
+            className="h-8 px-3 rounded-full flex items-center gap-1.5 text-white font-body text-xs font-semibold"
+            style={{ backgroundColor: ACCENT.teal }}
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{t.download}</span>
+          </button>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="w-8 h-8 rounded-full flex items-center justify-center bg-white/10 hover:bg-white/20 transition"
+          >
+            <X className="w-4 h-4 text-white" />
+          </button>
+        </div>
+      </div>
+
+      <div
+        className="relative flex-1 min-h-0 w-full flex items-center justify-center"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {src ? (
+          <div
+            className="relative overflow-hidden rounded-lg max-w-full max-h-full"
+            style={{ cursor: zoomAt ? "zoom-out" : "zoom-in" }}
+            onMouseMove={(e) => track(e.clientX, e.clientY, e.currentTarget)}
+            onMouseLeave={() => setZoomAt(null)}
+            // Touch pans the magnified view; lifting drops back to fitted.
+            onTouchStart={(e) => track(e.touches[0].clientX, e.touches[0].clientY, e.currentTarget)}
+            onTouchMove={(e) => track(e.touches[0].clientX, e.touches[0].clientY, e.currentTarget)}
+            onTouchEnd={() => setZoomAt(null)}
+          >
+            <img
+              src={src}
+              alt={entry.label}
+              className="block max-w-full object-contain"
+              style={{
+                maxHeight: "78vh",
+                transform: zoomAt ? `scale(${ZOOM_FACTOR})` : "none",
+                transformOrigin: zoomAt ? `${zoomAt.x}% ${zoomAt.y}%` : "center",
+                transition: "transform 140ms ease-out",
+              }}
+            />
+          </div>
+        ) : (
+          <p className="font-body text-sm text-white/60">…</p>
+        )}
+
+        {entries.length > 1 && (
+          <>
+            <button
+              onClick={() => step(-1)}
+              aria-label="Previous"
+              className={`${navBtn} left-0 sm:-left-2 bg-white/10 hover:bg-white/25`}
+            >
+              ‹
+            </button>
+            <button
+              onClick={() => step(1)}
+              aria-label="Next"
+              className={`${navBtn} right-0 sm:-right-2 bg-white/10 hover:bg-white/25`}
+            >
+              ›
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockupSrc, designSrc, resolved, generationId, onOpen, t }, ref) {
   const canvasRef = useRef(null);
   const [hasImage, setHasImage] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
-  /** Cursor position as a percentage of the tile, or null when not zooming. */
-  const [zoomAt, setZoomAt] = useState(null);
 
   useEffect(() => {
     setLoadFailed(false);
@@ -1861,55 +2041,37 @@ const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockup
     );
   }
 
-  // Inspect-on-hover. The zoom is a CSS transform on the existing canvas with
-  // its origin pinned under the cursor, so pointing at a spot magnifies that
-  // spot. Nothing is re-rendered and no second bitmap is allocated — with a
-  // dozen full-resolution mockups on screen, a magnifier that copied pixels
-  // per frame would cost far more than the feature is worth.
-  const trackZoom = (clientX, clientY, el) => {
-    const r = el.getBoundingClientRect();
-    if (!r.width || !r.height) return;
-    setZoomAt({
-      x: Math.min(100, Math.max(0, ((clientX - r.left) / r.width) * 100)),
-      y: Math.min(100, Math.max(0, ((clientY - r.top) / r.height) * 100)),
-    });
-  };
-
+  // The tile itself is a button into the full-size viewer.
+  //
+  // Magnifying in place was the obvious first move and the wrong one: three
+  // times a 250px thumbnail is still a small picture, and the image sliding
+  // around under the pointer fights the click. Inspecting detail belongs at
+  // full size, so the tile's only job is to open — the magnifier lives in the
+  // viewer, where there is room for it to be useful.
   return (
     <div className="bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100">
-      <div
-        className="relative overflow-hidden bg-gray-100"
-        style={{ cursor: hasImage ? (zoomAt ? "zoom-out" : "zoom-in") : "default" }}
-        onMouseMove={(e) => hasImage && trackZoom(e.clientX, e.clientY, e.currentTarget)}
-        onMouseLeave={() => setZoomAt(null)}
-        // Touch gets the same behaviour: drag a finger to pan the magnified
-        // view, lift to drop back out.
-        onTouchStart={(e) =>
-          hasImage && trackZoom(e.touches[0].clientX, e.touches[0].clientY, e.currentTarget)
-        }
-        onTouchMove={(e) =>
-          hasImage && trackZoom(e.touches[0].clientX, e.touches[0].clientY, e.currentTarget)
-        }
-        onTouchEnd={() => setZoomAt(null)}
+      <button
+        type="button"
+        onClick={() => hasImage && onOpen?.()}
+        disabled={!hasImage}
+        aria-label={`${label} — ${t.enlarge}`}
+        className="relative block w-full overflow-hidden bg-gray-100 group cursor-zoom-in disabled:cursor-default"
       >
-        <canvas
-          ref={canvasRef}
-          className="w-full h-auto block"
-          style={{
-            transform: zoomAt ? `scale(${ZOOM_FACTOR})` : "none",
-            transformOrigin: zoomAt ? `${zoomAt.x}% ${zoomAt.y}%` : "center",
-            transition: "transform 120ms ease-out",
-          }}
-        />
-        {hasImage && !zoomAt && (
-          <span
-            className="absolute bottom-1.5 right-1.5 w-5 h-5 rounded-full flex items-center justify-center pointer-events-none"
-            style={{ backgroundColor: "rgba(17,24,39,0.55)" }}
-          >
-            <ZoomIn className="w-3 h-3 text-white" strokeWidth={2.5} />
-          </span>
+        <canvas ref={canvasRef} className="w-full h-auto block" />
+        {hasImage && (
+          <>
+            {/* Hover affordance: the tile is clickable, and says so. */}
+            <span className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors" />
+            <span
+              className="absolute bottom-1.5 right-1.5 flex items-center gap-1 rounded-full pl-1.5 pr-2 py-1 opacity-90 group-hover:opacity-100 transition"
+              style={{ backgroundColor: "rgba(17,24,39,0.62)" }}
+            >
+              <ZoomIn className="w-3 h-3 text-white" strokeWidth={2.5} />
+              <span className="font-body text-[10px] text-white font-semibold">{t.enlarge}</span>
+            </span>
+          </>
         )}
-      </div>
+      </button>
       <div className="p-2 flex items-center justify-between gap-2">
         <span className="font-body text-[11px] text-gray-700 font-medium truncate">{label}</span>
         <button
