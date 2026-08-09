@@ -127,6 +127,10 @@ const T = {
     opacity: "Opaklık",
     download: "İndir",
     enlarge: "Büyüt",
+    generatePending: "Yeni mockupları üret",
+    keepsExisting: "Üretilmiş mockuplar olduğu gibi kalır",
+    generateOne: "Sadece bunu üret",
+    regenerateOne: "Bunu yeniden üret",
     zoomHint: "Detay için imleci görselin üzerinde gezdir · ← → ile gez · ESC kapatır",
     downloadAll: "Tümünü İndir (ZIP)",
     zippingAll: "ZIP hazırlanıyor…",
@@ -171,6 +175,10 @@ const T = {
     opacity: "Deckkraft",
     download: "Herunterladen",
     enlarge: "Vergrößern",
+    generatePending: "Neue Mockups erzeugen",
+    keepsExisting: "Fertige Mockups bleiben unverändert",
+    generateOne: "Nur dieses erzeugen",
+    regenerateOne: "Dieses neu erzeugen",
     zoomHint: "Zum Vergrößern über das Bild fahren · ← → blättern · ESC schließt",
     downloadAll: "Alle herunterladen (ZIP)",
     zippingAll: "ZIP wird erstellt…",
@@ -215,6 +223,10 @@ const T = {
     opacity: "Opacity",
     download: "Download",
     enlarge: "Enlarge",
+    generatePending: "Generate new",
+    keepsExisting: "Already-generated mockups stay as they are",
+    generateOne: "Generate just this one",
+    regenerateOne: "Regenerate this one",
     zoomHint: "Hover the image to magnify · ← → to browse · ESC to close",
     downloadAll: "Download All (ZIP)",
     zippingAll: "Zipping…",
@@ -260,11 +272,20 @@ function MockupStudio() {
   // Templates this tab changed. Only these are written back, so a record
   // deleted remotely is not resurrected by a stale in-memory store.
   const dirtyKeysRef = useRef(new Set());
-  const [generated, setGenerated] = useState(false);
-  // Bumped on every Generate press. Previews key off it, so pressing the
-  // button after fixing a placement always repaints — rather than doing
-  // nothing visible because `generated` was already true.
-  const [generationId, setGenerationId] = useState(0);
+  // Which mockups have been composited, as file key → generation stamp.
+  //
+  // This was a single boolean plus one global counter, which meant every press
+  // of Generate re-composited every tile. Working across two or three folders
+  // made the cost obvious: adding a second folder's mockups hid the finished
+  // results and redrew all of them, including the ones that were already
+  // right. A stamp per mockup lets a press touch only what has not been
+  // rendered yet, and lets one mockup be rendered on its own.
+  //
+  // A tile re-renders when its own stamp changes, so bumping one key leaves
+  // every other tile's canvas untouched.
+  const [stamps, setStamps] = useState({});
+  const stampRef = useRef(0);
+  const nextStamp = () => ++stampRef.current;
   // Bumped to force the resolver to run again after locks are cleared.
   const [resolveNonce, setResolveNonce] = useState(0);
   const [zipStatus, setZipStatus] = useState("idle"); // idle | zipping | error
@@ -421,9 +442,11 @@ function MockupStudio() {
     return folder;
   }
 
+  // Selecting more mockups no longer discards the results already on screen.
+  // A mockup's stamp is kept even while it is deselected, so unticking and
+  // reticking one brings its finished render straight back.
   function toggleKey(key) {
     setSelectedKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
-    setGenerated(false);
   }
   function selectAllInFolder() {
     if (!currentFolder) return;
@@ -432,11 +455,10 @@ function MockupStudio() {
       for (const item of currentFolder.items) next.add(item.key);
       return Array.from(next);
     });
-    setGenerated(false);
   }
   function clearSelection() {
     setSelectedKeys([]);
-    setGenerated(false);
+    setStamps({});
   }
 
   // Seçilen mockuplar (klasörler arası seçim korunur)
@@ -451,6 +473,15 @@ function MockupStudio() {
   const dockKeys = entries.map((e) => e.key);
   const matchedEntries = entries.filter((e) => e.src);
   const missingCount = entries.length - matchedEntries.length;
+
+  // Selection order is preserved, so mockups added from a second folder land
+  // after the ones already on screen rather than reshuffling them.
+  const generatedEntries = entries.filter((e) => stamps[e.key]);
+  const pendingEntries = matchedEntries.filter((e) => !stamps[e.key]);
+  const generated = generatedEntries.length > 0;
+  // Two folders can both hold a "White.png". Once results span more than one,
+  // the file name alone stops identifying a tile.
+  const showFolder = new Set(generatedEntries.map((e) => e.folder)).size > 1;
 
   // Hangi mockup fotoğrafının şu an düzenlendiğini, seçim değiştikçe geçerli tutar
   useEffect(() => {
@@ -469,17 +500,31 @@ function MockupStudio() {
   // and then locked, so it never gets measured again.
   const entriesSignature = entries.map((e) => e.key).join("|");
 
+  // Which templates have been resolved against the design currently loaded.
+  // Reset when the design changes or a re-measure is forced; otherwise it is
+  // what keeps a second folder's arrival from re-analysing the first folder.
+  const analysedRef = useRef({ design: null, nonce: -1, keys: new Set() });
+
   useEffect(() => {
     if (!designImg || entries.length === 0) return;
     let cancelled = false;
+
+    // A new artwork or a forced re-measure invalidates everything; adding
+    // mockups to the selection invalidates nothing that was already done.
+    const memo = analysedRef.current;
+    if (memo.design !== designImg || memo.nonce !== resolveNonce) {
+      analysedRef.current = { design: designImg, nonce: resolveNonce, keys: new Set() };
+    }
+    const analysed = analysedRef.current.keys;
+    const todo = entries.filter((e) => e.src && !analysed.has(e.key));
+    if (todo.length === 0) return;
 
     (async () => {
       setPlacementStatus("analyzing");
       let solvedAny = false;
 
-      for (const entry of entries) {
+      for (const entry of todo) {
         if (cancelled) return;
-        if (!entry.src) continue;
         try {
           const result = await resolvePlacement({
             templateId: entry.key,
@@ -494,6 +539,7 @@ function MockupStudio() {
             solvedAny = true;
             markDirty(entry.key);
           }
+          analysed.add(entry.key);
           setResolved((prev) => ({ ...prev, [entry.key]: result }));
         } catch (err) {
           console.error(`[placement] ${entry.key} failed:`, err.message);
@@ -559,9 +605,30 @@ function MockupStudio() {
     });
   }
 
+  /** Render whatever has not been rendered yet, leaving finished tiles alone. */
   function runGenerate() {
-    setGenerated(true);
-    setGenerationId((n) => n + 1);
+    const stamp = nextStamp();
+    setStamps((prev) => {
+      const next = { ...prev };
+      for (const e of matchedEntries) if (!next[e.key]) next[e.key] = stamp;
+      return next;
+    });
+  }
+
+  /** Render every selected mockup again, including ones already done. */
+  function regenerateAll() {
+    const stamp = nextStamp();
+    setStamps((prev) => {
+      const next = { ...prev };
+      for (const e of matchedEntries) next[e.key] = stamp;
+      return next;
+    });
+  }
+
+  /** Render a single mockup, without touching any other tile. */
+  function generateOne(key) {
+    if (!key) return;
+    setStamps((prev) => ({ ...prev, [key]: nextStamp() }));
   }
 
   /**
@@ -631,7 +698,8 @@ function MockupStudio() {
     if (!file) return;
     const dataUrl = await readFileAsDataURL(file);
     setDesignImg(dataUrl);
-    setGenerated(false);
+    // A different design invalidates every rendered tile.
+    setStamps({});
   }
 
   async function handleDesignDrop(e) {
@@ -641,7 +709,8 @@ function MockupStudio() {
     if (!file) return;
     const dataUrl = await readFileAsDataURL(file);
     setDesignImg(dataUrl);
-    setGenerated(false);
+    // A different design invalidates every rendered tile.
+    setStamps({});
   }
 
   async function handleDownloadAll() {
@@ -650,7 +719,7 @@ function MockupStudio() {
     try {
       const zip = new JSZip();
       const usedNames = new Set();
-      for (const e of matchedEntries) {
+      for (const e of generatedEntries) {
         const blob = await previewRefs.current.get(e.key)?.getBlob();
         if (!blob) continue;
         let name = safeFileName(e.key);
@@ -994,6 +1063,21 @@ function MockupStudio() {
                           {activeResolved && (
                             <PlacementReport resolved={activeResolved} />
                           )}
+                          {/* Render just the mockup being looked at. Useful
+                              after nudging one placement, and for checking a
+                              single shot without waiting on the whole set. */}
+                          {activeEntryKey && activeResolved && (
+                            <button
+                              onClick={() => generateOne(activeEntryKey)}
+                              className="px-3 py-2 rounded-lg text-xs font-semibold text-white transition flex items-center justify-center gap-1.5"
+                              style={{ backgroundColor: ACCENT.violet }}
+                              onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
+                              onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
+                            >
+                              <Sparkles className="w-3 h-3" />
+                              {stamps[activeEntryKey] ? t.regenerateOne : t.generateOne}
+                            </button>
+                          )}
                           {selectedKeys.length > 1 && (
                             <button
                               onClick={applyPlacementToAll}
@@ -1043,19 +1127,27 @@ function MockupStudio() {
                   </div>
                 )}
 
+                {/* With nothing pending the button falls back to redoing the
+                    whole set, which is what it always did. */}
                 <button
-                  onClick={runGenerate}
-                  disabled={!designImg || entries.length === 0}
+                  onClick={pendingEntries.length > 0 ? runGenerate : regenerateAll}
+                  disabled={!designImg || matchedEntries.length === 0}
                   className="w-full font-display font-bold text-white rounded-lg py-3 px-4 flex items-center justify-center gap-2 transition disabled:opacity-50 text-base"
                   style={{ backgroundColor: ACCENT.violet }}
                 >
                   <Sparkles className="w-4 h-4" />
-                  {generated ? "Regenerate" : "Generate"} ({entries.length})
+                  {pendingEntries.length === 0
+                    ? `Regenerate (${matchedEntries.length})`
+                    : generated
+                      ? `${t.generatePending} (${pendingEntries.length})`
+                      : `Generate (${pendingEntries.length})`}
                 </button>
                 <p className="text-xs font-body text-gray-500 mt-1">
-                  {generated
+                  {pendingEntries.length === 0
                     ? "Adjust a placement above, then regenerate"
-                    : "~30-60 sec"}
+                    : generated
+                      ? t.keepsExisting
+                      : "~30-60 sec"}
                 </p>
               </div>
             )}
@@ -1063,7 +1155,7 @@ function MockupStudio() {
         </div>
 
         {/* Step 4: Results & Download */}
-        {generated && entries.length > 0 && (
+        {generatedEntries.length > 0 && (
           <div className="mb-8 sm:mb-12">
             <div className="flex items-start gap-4 mb-4">
               <div className="flex items-center justify-center w-10 h-10 rounded-full font-display font-bold text-white" style={{ backgroundColor: ACCENT.violet }}>
@@ -1097,7 +1189,7 @@ function MockupStudio() {
                   </button>
                 <button
                   onClick={handleDownloadAll}
-                  disabled={matchedEntries.length === 0 || zipStatus === "zipping"}
+                  disabled={generatedEntries.length === 0 || zipStatus === "zipping"}
                   className="flex items-center gap-1.5 text-xs font-body font-semibold rounded-full px-3 py-1.5 text-white disabled:opacity-40"
                   style={{ backgroundColor: "#1a1a1a" }}
                 >
@@ -1112,7 +1204,7 @@ function MockupStudio() {
                 </p>
               )}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {entries.map((e) => (
+                {generatedEntries.map((e) => (
                   <MockupPreview
                     key={e.key}
                     ref={(el) => {
@@ -1124,7 +1216,8 @@ function MockupStudio() {
                     mockupSrc={e.src}
                     designSrc={designImg}
                     resolved={resolved[e.key]}
-                    generationId={generationId}
+                    folder={showFolder ? e.folder : null}
+                    stamp={stamps[e.key]}
                     onOpen={() => setLightboxKey(e.key)}
                     t={t}
                   />
@@ -1874,8 +1967,9 @@ function ResultLightbox({ entries, activeKey, onNavigate, onClose, previewRefs, 
       <div className="w-full flex items-center justify-between gap-3 mb-3 shrink-0" onClick={(e) => e.stopPropagation()}>
         <div className="min-w-0">
           <p className="font-display font-semibold text-sm sm:text-base text-white truncate">{entry.label}</p>
-          <p className="font-mono2 text-[10px] text-white/50">
-            {index + 1} / {entries.length} · {t.zoomHint}
+          <p className="font-mono2 text-[10px] text-white/50 truncate">
+            {index + 1} / {entries.length}
+            {entry.folder ? ` · ${entry.folder}` : ""} · {t.zoomHint}
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -1951,7 +2045,7 @@ function ResultLightbox({ entries, activeKey, onNavigate, onClose, previewRefs, 
   );
 }
 
-const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockupSrc, designSrc, resolved, generationId, onOpen, t }, ref) {
+const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, folder, mockupSrc, designSrc, resolved, stamp, onOpen, t }, ref) {
   const canvasRef = useRef(null);
   const [hasImage, setHasImage] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -2004,9 +2098,10 @@ const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockup
     return () => {
       cancelled = true;
     };
-    // generationId is in the deps so pressing Generate always repaints,
-    // even when nothing else changed.
-  }, [mockupSrc, designSrc, resolved, generationId]);
+    // The stamp is in the deps so a Generate that targets this mockup always
+    // repaints it, even when nothing else changed — and so a Generate that
+    // targets only other mockups leaves this canvas alone.
+  }, [mockupSrc, designSrc, resolved, stamp]);
 
   function download() {
     const canvas = canvasRef.current;
@@ -2073,7 +2168,12 @@ const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, mockup
         )}
       </button>
       <div className="p-2 flex items-center justify-between gap-2">
-        <span className="font-body text-[11px] text-gray-700 font-medium truncate">{label}</span>
+        <span className="min-w-0 flex-1">
+          <span className="font-body text-[11px] text-gray-700 font-medium truncate block">{label}</span>
+          {folder && (
+            <span className="font-mono2 text-[9px] text-gray-400 truncate block">{folder}</span>
+          )}
+        </span>
         <button
           onClick={download}
           disabled={!hasImage}
