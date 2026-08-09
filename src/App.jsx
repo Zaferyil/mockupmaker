@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { LoginPage } from "./LoginPage";
 import { AdminPanel } from "./AdminPanel";
+import { InstallPrompt } from "./InstallPrompt";
 import { getCurrentUser, logout, getUserR2Path } from "./auth";
 import {
   createLockStore,
@@ -2276,11 +2277,14 @@ export default function App() {
 
   if (!currentUser) {
     return (
-      <LoginPage
-        onLoginSuccess={(user) => {
-          setCurrentUser(user);
-        }}
-      />
+      <>
+        <LoginPage
+          onLoginSuccess={(user) => {
+            setCurrentUser(user);
+          }}
+        />
+        <InstallPrompt lang={lang} />
+      </>
     );
   }
 
@@ -2385,6 +2389,8 @@ export default function App() {
 
       {/* Main App */}
       <MockupStudio lang={lang} setLang={setLang} />
+
+      <InstallPrompt lang={lang} />
     </div>
   );
 }

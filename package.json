@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test:placement": "node test/run.mjs"
+    "test:placement": "node test/run.mjs",
+    "icons": "node scripts/generate-icons.mjs"
   },
   "dependencies": {
     "@tensorflow-models/coco-ssd": "^2.2.3",
