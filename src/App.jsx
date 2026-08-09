@@ -128,6 +128,7 @@ const T = {
     download: "İndir",
     enlarge: "Büyüt",
     generatePending: "Yeni mockupları üret",
+    autoPlaceOne: "Bunu yeniden yerleştir",
     keepsExisting: "Üretilmiş mockuplar olduğu gibi kalır",
     generateOne: "Sadece bunu üret",
     regenerateOne: "Bunu yeniden üret",
@@ -176,6 +177,7 @@ const T = {
     download: "Herunterladen",
     enlarge: "Vergrößern",
     generatePending: "Neue Mockups erzeugen",
+    autoPlaceOne: "Dieses neu platzieren",
     keepsExisting: "Fertige Mockups bleiben unverändert",
     generateOne: "Nur dieses erzeugen",
     regenerateOne: "Dieses neu erzeugen",
@@ -224,6 +226,7 @@ const T = {
     download: "Download",
     enlarge: "Enlarge",
     generatePending: "Generate new",
+    autoPlaceOne: "Auto-place this one again",
     keepsExisting: "Already-generated mockups stay as they are",
     generateOne: "Generate just this one",
     regenerateOne: "Regenerate this one",
@@ -293,6 +296,9 @@ function MockupStudio() {
   // rather than an index so re-ordering or re-generating the grid cannot leave
   // the viewer pointing at a different mockup than the one that was clicked.
   const [lightboxKey, setLightboxKey] = useState(null);
+  // Which single mockup is being re-detected right now, so its tile can show
+  // the work and a second click cannot start an overlapping run.
+  const [autoPlacingKey, setAutoPlacingKey] = useState(null);
 
   // R2 bucket'ındaki gerçek mockup dosyalarının canlı listesi
   const [r2Status, setR2Status] = useState(R2_LIST_URL ? "loading" : "unconfigured");
@@ -656,6 +662,49 @@ function MockupStudio() {
       return next;
     });
     setResolveNonce((n) => n + 1);
+  }
+
+  /**
+   * Re-detect the placement for one mockup, leaving every other one alone.
+   *
+   * Spotting a single bad placement in a grid of twelve used to mean discarding
+   * the whole set's geometry to fix it — including the ones that were hand
+   * calibrated. Because a lock is per-template, forgetting exactly one is well
+   * defined: this template is measured again from its own photograph, and
+   * nothing else in the set is touched.
+   *
+   * The tile repaints on its own, without a stamp bump, because its render
+   * effect already depends on its resolved placement.
+   */
+  async function autoPlaceOne(key) {
+    const entry = entries.find((e) => e.key === key);
+    if (!entry?.src || !designImg || autoPlacingKey) return;
+
+    setAutoPlacingKey(key);
+    locksRef.current.clear(key);
+    forgetTemplateMeasurement(key);
+    markDirty(key);
+    // Drop it from the resolver's memo too, or the incremental pass would
+    // consider this template already done and skip it.
+    analysedRef.current.keys.delete(key);
+
+    try {
+      const result = await resolvePlacement({
+        templateId: key,
+        mockupSrc: entry.src,
+        artworkSrc: designImg,
+        locks: locksRef.current,
+        opacity: resolved[key]?.placement.opacity ?? 100,
+        log: (msg) => console.log(msg),
+      });
+      analysedRef.current.keys.add(key);
+      setResolved((prev) => ({ ...prev, [key]: result }));
+      if (result.report.tier === "solved") persistLocks();
+    } catch (err) {
+      console.error(`[placement] ${key} re-place failed:`, err.message);
+    } finally {
+      setAutoPlacingKey(null);
+    }
   }
 
   /**
@@ -1219,6 +1268,8 @@ function MockupStudio() {
                     folder={showFolder ? e.folder : null}
                     stamp={stamps[e.key]}
                     onOpen={() => setLightboxKey(e.key)}
+                    onAutoPlace={() => autoPlaceOne(e.key)}
+                    autoPlacing={autoPlacingKey === e.key}
                     t={t}
                   />
                 ))}
@@ -2045,7 +2096,7 @@ function ResultLightbox({ entries, activeKey, onNavigate, onClose, previewRefs, 
   );
 }
 
-const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, folder, mockupSrc, designSrc, resolved, stamp, onOpen, t }, ref) {
+const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, folder, mockupSrc, designSrc, resolved, stamp, onOpen, onAutoPlace, autoPlacing, t }, ref) {
   const canvasRef = useRef(null);
   const [hasImage, setHasImage] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -2174,14 +2225,30 @@ const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, folder
             <span className="font-mono2 text-[9px] text-gray-400 truncate block">{folder}</span>
           )}
         </span>
-        <button
-          onClick={download}
-          disabled={!hasImage}
-          className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center"
-          style={{ backgroundColor: ACCENT.teal }}
-        >
-          <Download className="w-3 h-3 text-white" />
-        </button>
+        <span className="shrink-0 flex items-center gap-1.5">
+          {/* Re-detect this one mockup. Sits next to its own download so a bad
+              placement is fixed where it is noticed. */}
+          {onAutoPlace && (
+            <button
+              onClick={onAutoPlace}
+              disabled={!hasImage || autoPlacing}
+              title={t.autoPlaceOne}
+              aria-label={`${label} — ${t.autoPlaceOne}`}
+              className="w-6 h-6 rounded-full flex items-center justify-center transition disabled:opacity-60"
+              style={{ backgroundColor: ACCENT.violet }}
+            >
+              <Sparkles className={`w-3 h-3 text-white ${autoPlacing ? "animate-pulse" : ""}`} />
+            </button>
+          )}
+          <button
+            onClick={download}
+            disabled={!hasImage}
+            className="w-6 h-6 rounded-full flex items-center justify-center"
+            style={{ backgroundColor: ACCENT.teal }}
+          >
+            <Download className="w-3 h-3 text-white" />
+          </button>
+        </span>
       </div>
     </div>
   );
