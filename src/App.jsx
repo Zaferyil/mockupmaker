@@ -60,8 +60,39 @@ function mockupSrcFor(key) {
 }
 
 // İndirme/zip için güvenli dosya adı: "GM013/Pepper.png" -> "GM013_Pepper.png"
-function safeFileName(key) {
-  return key.replace(/\//g, "_");
+/** Strip anything a file system would object to, and tidy the whitespace. */
+function sanitizeName(label) {
+  return label
+    .replace(/[\\/:*?"<>|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Download names for a set of generated mockups, as key → file name.
+ *
+ * The R2 key carries the folder — "Comfort Colors-1717/White.png" — and the
+ * download name used to carry it too. On a marketplace upload that prefix is
+ * noise; only the colour is wanted. Two folders can hold the same colour, so
+ * repeats are numbered in selection order: White.png, then White-2.png.
+ *
+ * The comparison is case-insensitive because the bucket really does contain
+ * both "Ivory" and "ivory", and those are the same file name on Windows and on
+ * a default macOS volume — they would silently overwrite each other.
+ *
+ * The extension is always .png, since that is what the canvas exports whatever
+ * the source photograph happened to be.
+ */
+function buildDownloadNames(entries) {
+  const counts = new Map();
+  const names = new Map();
+  for (const entry of entries) {
+    const stem = sanitizeName(entry.label) || "mockup";
+    const seen = (counts.get(stem.toLowerCase()) ?? 0) + 1;
+    counts.set(stem.toLowerCase(), seen);
+    names.set(entry.key, seen === 1 ? `${stem}.png` : `${stem}-${seen}.png`);
+  }
+  return names;
 }
 
 // R2 anahtarını klasör + dosyaya ayırır. Kullanıcı R2'de istediği isimde klasörler açar,
@@ -498,6 +529,9 @@ function MockupStudio({ lang, setLang }) {
   // Two folders can both hold a "White.png". Once results span more than one,
   // the file name alone stops identifying a tile.
   const showFolder = new Set(generatedEntries.map((e) => e.folder)).size > 1;
+  // Computed in one place so a tile's own download and the zip can never
+  // disagree about what a mockup is called.
+  const downloadNames = buildDownloadNames(generatedEntries);
 
   // Hangi mockup fotoğrafının şu an düzenlendiğini, seçim değiştikçe geçerli tutar
   useEffect(() => {
@@ -777,18 +811,10 @@ function MockupStudio({ lang, setLang }) {
     setZipStatus("zipping");
     try {
       const zip = new JSZip();
-      const usedNames = new Set();
       for (const e of generatedEntries) {
         const blob = await previewRefs.current.get(e.key)?.getBlob();
         if (!blob) continue;
-        let name = safeFileName(e.key);
-        let n = 2;
-        while (usedNames.has(name)) {
-          name = safeFileName(e.key).replace(/(\.\w+)$/i, `_${n}$1`);
-          n++;
-        }
-        usedNames.add(name);
-        zip.file(name, blob);
+        zip.file(downloadNames.get(e.key) ?? "mockup.png", blob);
       }
       const zipBlob = await zip.generateAsync({ type: "blob" });
       const url = URL.createObjectURL(zipBlob);
@@ -1270,12 +1296,12 @@ function MockupStudio({ lang, setLang }) {
                       if (el) previewRefs.current.set(e.key, el);
                       else previewRefs.current.delete(e.key);
                     }}
-                    fileKey={e.key}
                     label={e.label}
                     mockupSrc={e.src}
                     designSrc={designImg}
                     resolved={resolved[e.key]}
                     folder={showFolder ? e.folder : null}
+                    downloadName={downloadNames.get(e.key)}
                     stamp={stamps[e.key]}
                     onOpen={() => setLightboxKey(e.key)}
                     onAutoPlace={() => autoPlaceOne(e.key)}
@@ -2106,7 +2132,7 @@ function ResultLightbox({ entries, activeKey, onNavigate, onClose, previewRefs, 
   );
 }
 
-const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, folder, mockupSrc, designSrc, resolved, stamp, onOpen, onAutoPlace, autoPlacing, t }, ref) {
+const MockupPreview = forwardRef(function MockupPreview({ label, folder, downloadName, mockupSrc, designSrc, resolved, stamp, onOpen, onAutoPlace, autoPlacing, t }, ref) {
   const canvasRef = useRef(null);
   const [hasImage, setHasImage] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -2172,7 +2198,7 @@ const MockupPreview = forwardRef(function MockupPreview({ fileKey, label, folder
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = safeFileName(fileKey);
+      a.download = downloadName ?? "mockup.png";
       a.click();
       URL.revokeObjectURL(url);
     }, "image/png");
