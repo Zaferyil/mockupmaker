@@ -22,7 +22,7 @@ export function LoginPage({ onLoginSuccess }) {
     setIsLoading(true);
 
     try {
-      const user = login(email, password);
+      const user = await login(email, password);
       onLoginSuccess(user);
     } catch (err) {
       setError(err.message);
