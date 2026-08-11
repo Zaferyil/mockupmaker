@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { X, Plus, Trash2, Users } from "lucide-react";
-import { USERS, getAllUsers, addUser, removeUser } from "./users";
+import { getAllUsers, addUser, removeUser } from "./users";
 
 const ACCENT = {
   coral: "#FF5A36",
@@ -71,14 +71,33 @@ const T = {
 
 export function AdminPanel({ onClose, lang = "en" }) {
   const t = T[lang] ?? T.en;
-  const [users, setUsers] = useState(getAllUsers());
+  const [users, setUsers] = useState([]);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("password123");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
 
-  const handleAddUser = (e) => {
+  // Load users on mount
+  useEffect(() => {
+    loadUsers();
+  }, []);
+
+  const loadUsers = async () => {
+    try {
+      setIsLoading(true);
+      const allUsers = await getAllUsers();
+      setUsers(allUsers);
+    } catch (err) {
+      console.error("Error loading users:", err);
+      setError("Error loading users");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAddUser = async (e) => {
     e.preventDefault();
     setError("");
     setSuccess("");
@@ -88,29 +107,43 @@ export function AdminPanel({ onClose, lang = "en" }) {
       return;
     }
 
-    if (USERS[email]) {
-      setError(t.alreadyRegistered);
-      return;
+    try {
+      // Check if user already exists
+      const existingUsers = users.filter(u => u.email === email);
+      if (existingUsers.length > 0) {
+        setError(t.alreadyRegistered);
+        return;
+      }
+
+      // Add user to Firestore
+      await addUser(email, name, { password });
+
+      // Reload users list
+      await loadUsers();
+
+      setSuccess(t.added(name));
+      setEmail("");
+      setName("");
+      setPassword("password123");
+
+      setTimeout(() => setSuccess(""), 3000);
+    } catch (err) {
+      console.error("Error adding user:", err);
+      setError(err.message || "Error adding user");
     }
-
-    addUser(email, name, password);
-    setUsers(getAllUsers());
-    setSuccess(t.added(name));
-    setEmail("");
-    setName("");
-    setPassword("password123");
-
-    setTimeout(() => setSuccess(""), 3000);
   };
 
-  const handleDeleteUser = (userEmail) => {
-    if (
-      window.confirm(t.confirmDelete(userEmail))
-    ) {
-      removeUser(userEmail);
-      setUsers(getAllUsers());
-      setSuccess(t.removed(userEmail));
-      setTimeout(() => setSuccess(""), 3000);
+  const handleDeleteUser = async (userId, userEmail) => {
+    if (window.confirm(t.confirmDelete(userEmail))) {
+      try {
+        await removeUser(userId);
+        await loadUsers();
+        setSuccess(t.removed(userEmail));
+        setTimeout(() => setSuccess(""), 3000);
+      } catch (err) {
+        console.error("Error deleting user:", err);
+        setError("Error deleting user");
+      }
     }
   };
 
@@ -395,7 +428,7 @@ export function AdminPanel({ onClose, lang = "en" }) {
                         {user.email}
                       </div>
                     </div>
-                    {user.role === "admin" && (
+                    {user.isadmin && (
                       <span
                         style={{
                           padding: "2px 8px",
@@ -415,9 +448,9 @@ export function AdminPanel({ onClose, lang = "en" }) {
                     ID: {user.id}
                   </div>
 
-                  {user.email !== "zafer@example.com" && (
+                  {!user.isadmin && (
                     <button
-                      onClick={() => handleDeleteUser(user.email)}
+                      onClick={() => handleDeleteUser(user.id, user.email)}
                       style={{
                         width: "100%",
                         padding: "6px",
