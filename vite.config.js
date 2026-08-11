@@ -17,9 +17,4 @@ export default defineConfig({
       ),
     },
   },
-  build: {
-    rolldownOptions: {
-      external: ['firebase/auth', 'firebase/app', 'firebase/firestore'],
-    },
-  },
 })
