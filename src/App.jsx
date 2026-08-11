@@ -294,6 +294,7 @@ function readFileAsDataURL(file) {
 // panel lives outside the studio and has to follow the same switch.
 function MockupStudio({ lang, setLang }) {
   const [langOpen, setLangOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
 
   // Klasör-bazlı akış: R2'deki klasörler set'tir, içindeki her görsel bir mockup'tır.
@@ -844,10 +845,23 @@ function MockupStudio({ lang, setLang }) {
       {/* Header */}
       <div className="sticky top-0 z-40 bg-white border-b border-gray-100">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button className="p-2 hover:bg-gray-100 rounded-lg">
+          <div className="flex items-center gap-3 relative">
+            <button onClick={() => setMenuOpen(!menuOpen)} className="p-2 hover:bg-gray-100 rounded-lg">
               <span className="text-xl">☰</span>
             </button>
+            {menuOpen && currentUser?.isadmin && (
+              <div className="absolute left-0 top-12 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-48">
+                <button
+                  onClick={() => {
+                    setAdminPanelOpen(true);
+                    setMenuOpen(false);
+                  }}
+                  className="block w-full text-left px-4 py-3 text-sm font-body hover:bg-gray-50 text-gray-700 border-b border-gray-100"
+                >
+                  ⚙️ Yeni Kullanıcı Ekle
+                </button>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: ACCENT.violet }}>
                 <Shirt className="w-5 h-5 text-white" strokeWidth={2} />
@@ -2336,7 +2350,7 @@ export default function App() {
       >
         <div>
           <span style={{ fontWeight: "600" }}>👤 {currentUser.name}</span>
-          {currentUser.role === "admin" && (
+          {currentUser.isadmin && (
             <span
               style={{
                 marginLeft: "8px",
@@ -2352,7 +2366,7 @@ export default function App() {
         </div>
 
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          {currentUser.role === "admin" && (
+          {currentUser.isadmin && (
             <button
               onClick={() => setAdminPanelOpen(true)}
               style={{
