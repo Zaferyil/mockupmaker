@@ -1,85 +1,62 @@
-import { db } from "./firebase";
-import { collection, getDocs, doc, setDoc, deleteDoc, query, where } from "firebase/firestore";
-
 /**
- * Get all users from Firestore
+ * Simple localStorage-based user management
  */
-export async function getAllUsers() {
+const USERS_KEY = "mockupmaker_users";
+
+function getStoredUsers() {
   try {
-    const usersCollection = collection(db, "users");
-    const snapshot = await getDocs(usersCollection);
-    return snapshot.docs.map(doc => ({
-      id: doc.id,
-      email: doc.data().email,
-      ...doc.data()
-    }));
-  } catch (error) {
-    console.error("Error fetching users:", error);
+    const stored = localStorage.getItem(USERS_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
     return [];
   }
 }
 
-/**
- * Get user by email from Firestore
- */
-export async function getUserByEmail(email) {
-  try {
-    const usersCollection = collection(db, "users");
-    const q = query(usersCollection, where("email", "==", email));
-    const snapshot = await getDocs(q);
-
-    if (snapshot.empty) {
-      return null;
-    }
-
-    const doc = snapshot.docs[0];
-    return {
-      id: doc.id,
-      email: doc.data().email,
-      ...doc.data()
-    };
-  } catch (error) {
-    console.error("Error fetching user:", error);
-    return null;
-  }
+function saveUsers(users) {
+  localStorage.setItem(USERS_KEY, JSON.stringify(users));
 }
 
 /**
- * Add user to Firestore
- * Note: User creation in Firebase requires server-side Admin SDK
- * This function assumes the user has been created in Firebase Auth first
- * You can use Firebase Admin SDK, Cloud Functions, or a custom backend to create users
+ * Get all users
+ */
+export async function getAllUsers() {
+  return getStoredUsers();
+}
+
+/**
+ * Get user by email
+ */
+export async function getUserByEmail(email) {
+  const users = getStoredUsers();
+  return users.find(u => u.email === email) || null;
+}
+
+/**
+ * Add new user
  */
 export async function addUser(email, name, metadata = {}) {
   try {
+    const users = getStoredUsers();
+
     // Check if user already exists
-    const existing = await getUserByEmail(email);
-    if (existing) {
-      console.warn(`User ${email} already exists`);
-      return null;
+    if (users.find(u => u.email === email)) {
+      throw new Error("User already exists");
     }
 
-    // Add user to Firestore
-    // Note: The uid should be the Firebase Auth UID
-    // For admin panel creation, you'll need to use Firebase Admin SDK or a backend endpoint
-    const userRef = doc(db, "users", `temp_${Date.now()}`);
-
-    await setDoc(userRef, {
+    const newUser = {
+      id: `user_${Date.now()}`,
       email,
       name,
       isadmin: metadata.isadmin || false,
+      password: metadata.password || "password123",
       createdAt: new Date().toISOString(),
       ...metadata
-    });
-
-    console.log(`User ${email} added to Firestore`);
-    return {
-      id: userRef.id,
-      email,
-      name,
-      isadmin: metadata.isadmin || false,
-      createdAt: new Date().toISOString()
     };
+
+    users.push(newUser);
+    saveUsers(users);
+
+    return newUser;
   } catch (error) {
     console.error("Error adding user:", error);
     throw error;
@@ -87,14 +64,14 @@ export async function addUser(email, name, metadata = {}) {
 }
 
 /**
- * Remove user from Firestore
- * Note: To fully delete a user, you need to also delete them from Firebase Auth using Admin SDK
+ * Remove user
  */
 export async function removeUser(userId) {
   try {
-    const userRef = doc(db, "users", userId);
-    await deleteDoc(userRef);
-    console.log(`User ${userId} removed from Firestore`);
+    const users = getStoredUsers();
+    const filtered = users.filter(u => u.id !== userId);
+    saveUsers(filtered);
+    console.log(`User ${userId} removed`);
   } catch (error) {
     console.error("Error removing user:", error);
     throw error;
