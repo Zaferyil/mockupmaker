@@ -525,7 +525,6 @@ function MockupStudio({ lang, setLang, currentUser, onOpenAdminPanel }) {
   // Selection order is preserved, so mockups added from a second folder land
   // after the ones already on screen rather than reshuffling them.
   const generatedEntries = entries.filter((e) => stamps[e.key]);
-  const pendingEntries = matchedEntries.filter((e) => !stamps[e.key]);
   const generated = generatedEntries.length > 0;
   // Two folders can both hold a "White.png". Once results span more than one,
   // the file name alone stops identifying a tile.
@@ -543,7 +542,19 @@ function MockupStudio({ lang, setLang, currentUser, onOpenAdminPanel }) {
     });
   }, [entries]);
 
-  const activeSrc = entries.find((e) => e.key === activeEntryKey)?.src ?? null;
+  const activeEntry = entries.find((e) => e.key === activeEntryKey) ?? null;
+  const activeSrc = activeEntry?.src ?? null;
+
+  // Klasörler arası seçim bilerek korunuyor (bir önceki dosyada bitirdiğin iş
+  // ekranda kalsın diye), ama bu yüzden Generate/Regenerate ve "Apply to all"
+  // hiçbir zaman TÜM seçime değil, sadece üzerinde çalıştığın mockup'ın
+  // klasörüne uygulanmalı — yoksa başka bir dosyada zaten bitmiş olan
+  // mockup'lar farkında olmadan yeniden çizilir ya da yerinden oynar.
+  const currentFolderEntries = activeEntry
+    ? entries.filter((e) => e.folder === activeEntry.folder)
+    : entries;
+  const currentFolderMatchedEntries = currentFolderEntries.filter((e) => e.src);
+  const pendingEntries = currentFolderMatchedEntries.filter((e) => !stamps[e.key]);
 
   // ---- placement resolution -------------------------------------------
   // Runs the pipeline once per (template, artwork) pair. A template that
@@ -656,22 +667,31 @@ function MockupStudio({ lang, setLang, currentUser, onOpenAdminPanel }) {
     });
   }
 
-  /** Render whatever has not been rendered yet, leaving finished tiles alone. */
+  /**
+   * Render whatever has not been rendered yet, leaving finished tiles alone.
+   *
+   * Scoped to the active mockup's folder, not the whole cross-folder
+   * selection — a previous file that already finished should never be
+   * touched just because its mockups are still technically selected.
+   */
   function runGenerate() {
     const stamp = nextStamp();
     setStamps((prev) => {
       const next = { ...prev };
-      for (const e of matchedEntries) if (!next[e.key]) next[e.key] = stamp;
+      for (const e of currentFolderMatchedEntries) if (!next[e.key]) next[e.key] = stamp;
       return next;
     });
   }
 
-  /** Render every selected mockup again, including ones already done. */
+  /**
+   * Render every mockup in the active folder again, including ones already
+   * done — but only that folder, for the same reason as runGenerate above.
+   */
   function regenerateAll() {
     const stamp = nextStamp();
     setStamps((prev) => {
       const next = { ...prev };
-      for (const e of matchedEntries) next[e.key] = stamp;
+      for (const e of currentFolderMatchedEntries) next[e.key] = stamp;
       return next;
     });
   }
@@ -753,9 +773,13 @@ function MockupStudio({ lang, setLang, currentUser, onOpenAdminPanel }) {
   }
 
   /**
-   * Copy the active template's calibrated geometry to every selected mockup.
-   * Because placements are normalized, the same centre and width transfer
-   * correctly across mockups of different pixel dimensions.
+   * Copy the active template's calibrated geometry to every mockup in the
+   * same folder. Because placements are normalized, the same centre and
+   * width transfer correctly across mockups of different pixel dimensions.
+   *
+   * Scoped to the active mockup's folder rather than the whole cross-folder
+   * selection: a different file selected earlier in the session has its own
+   * calibration and must not have it silently overwritten by this one's.
    */
   function applyPlacementToAll() {
     const source = resolved[activeEntryKey];
@@ -763,7 +787,7 @@ function MockupStudio({ lang, setLang, currentUser, onOpenAdminPanel }) {
 
     setResolved((prev) => {
       const next = { ...prev };
-      for (const key of selectedKeys) {
+      for (const { key } of currentFolderEntries) {
         const target = next[key];
         if (!target) continue;
         // Reuse centre, width and rotation; height re-derives from this
@@ -1182,7 +1206,7 @@ function MockupStudio({ lang, setLang, currentUser, onOpenAdminPanel }) {
                               {stamps[activeEntryKey] ? t.regenerateOne : t.generateOne}
                             </button>
                           )}
-                          {selectedKeys.length > 1 && (
+                          {currentFolderEntries.length > 1 && (
                             <button
                               onClick={applyPlacementToAll}
                               className="px-3 py-2 rounded-lg text-xs font-semibold text-white transition"
@@ -1190,7 +1214,7 @@ function MockupStudio({ lang, setLang, currentUser, onOpenAdminPanel }) {
                               onMouseEnter={(e) => (e.target.style.opacity = "0.9")}
                               onMouseLeave={(e) => (e.target.style.opacity = "1")}
                             >
-                              ✓ Apply to all {selectedKeys.length} mockups
+                              ✓ Apply to all {currentFolderEntries.length} mockups
                             </button>
                           )}
                         </div>
@@ -1232,16 +1256,17 @@ function MockupStudio({ lang, setLang, currentUser, onOpenAdminPanel }) {
                 )}
 
                 {/* With nothing pending the button falls back to redoing the
-                    whole set, which is what it always did. */}
+                    active folder, which is what it always did — just no
+                    longer spilling into folders selected earlier. */}
                 <button
                   onClick={pendingEntries.length > 0 ? runGenerate : regenerateAll}
-                  disabled={!designImg || matchedEntries.length === 0}
+                  disabled={!designImg || currentFolderMatchedEntries.length === 0}
                   className="w-full font-display font-bold text-white rounded-lg py-3 px-4 flex items-center justify-center gap-2 transition disabled:opacity-50 text-base"
                   style={{ backgroundColor: ACCENT.violet }}
                 >
                   <Sparkles className="w-4 h-4" />
                   {pendingEntries.length === 0
-                    ? `Regenerate (${matchedEntries.length})`
+                    ? `Regenerate (${currentFolderMatchedEntries.length})`
                     : generated
                       ? `${t.generatePending} (${pendingEntries.length})`
                       : `Generate (${pendingEntries.length})`}
