@@ -1,13 +1,11 @@
 /**
- * Oturum yönetimi — localStorage üzerinde çalışır, harici bir servise
- * bağlı değildir.
+ * Oturum yönetimi.
  *
- * Daha önce Firebase Authentication kullanılıyordu; API anahtarı doğrulaması
- * sürekli "auth/api-key-not-valid" veriyordu ve `firebase` paketi lockfile'da
- * olmadığı için Netlify build'i de kırılıyordu. Uygulamanın kullanıcı sayısı
- * elle yönetilecek kadar az olduğundan giriş tekrar yerel depoya alındı.
+ * Doğrulama sunucuda yapılıyor (netlify/functions/login.js); burada yalnızca
+ * dönen oturum ve jeton saklanıyor. Kullanıcı listesi Netlify Blobs'ta
+ * durduğu için aynı hesapla her cihazdan giriş yapılabiliyor.
  */
-import { findUserByEmail, isAdminUser } from "./userStore";
+import { isAdminUser } from "./userStore";
 
 const CURRENT_USER_KEY = "mockupmaker_currentUser";
 const TOKEN_KEY = "mockupmaker_token";
@@ -15,19 +13,25 @@ const TOKEN_KEY = "mockupmaker_token";
 export { isAdminUser };
 
 export async function login(email, password) {
-  const user = findUserByEmail(email);
-
-  if (!user || user.password !== password) {
-    throw new Error("Invalid email or password");
+  let response;
+  try {
+    response = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+  } catch {
+    throw new Error("Sunucuya ulaşılamadı — internet bağlantını kontrol et");
   }
 
-  // Şifre oturum nesnesine sızmasın: localStorage'ı herkes okuyabilir.
-  const { password: _password, ...session } = user;
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || "Invalid email or password");
+  }
 
-  localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(session));
-  localStorage.setItem(TOKEN_KEY, btoa(`${session.email}:${Date.now()}`));
-
-  return session;
+  localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(payload.user));
+  localStorage.setItem(TOKEN_KEY, payload.token);
+  return payload.user;
 }
 
 export async function logout() {
@@ -52,7 +56,7 @@ export function isAdmin() {
   return isAdminUser(getCurrentUser());
 }
 
-export async function getToken() {
+export function getToken() {
   return localStorage.getItem(TOKEN_KEY);
 }
 
