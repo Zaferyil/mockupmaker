@@ -133,7 +133,14 @@ export function AdminPanel({ onClose, lang = "en" }) {
     }
   };
 
-  const handleDeleteUser = async (userId, userEmail) => {
+  const handleDeleteUser = async (userId, userEmail, isAdmin) => {
+    // Prevent deletion of admin users
+    if (isAdmin) {
+      setError("Admin users cannot be deleted");
+      setTimeout(() => setError(""), 3000);
+      return;
+    }
+
     if (window.confirm(t.confirmDelete(userEmail))) {
       try {
         await removeUser(userId);
@@ -448,29 +455,28 @@ export function AdminPanel({ onClose, lang = "en" }) {
                     ID: {user.id}
                   </div>
 
-                  {!user.isadmin && (
-                    <button
-                      onClick={() => handleDeleteUser(user.id, user.email)}
-                      style={{
-                        width: "100%",
-                        padding: "6px",
-                        background: "#fee2e2",
-                        border: "1px solid #fecaca",
-                        color: "#991b1b",
-                        borderRadius: "4px",
-                        fontSize: "12px",
-                        fontWeight: "500",
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: "4px",
-                      }}
-                    >
-                      <Trash2 size={14} />
-                      {t.delete}
-                    </button>
-                  )}
+                  <button
+                    onClick={() => handleDeleteUser(user.id, user.email, user.isadmin)}
+                    disabled={user.isadmin}
+                    style={{
+                      width: "100%",
+                      padding: "6px",
+                      background: user.isadmin ? "#e5e7eb" : "#fee2e2",
+                      border: user.isadmin ? "1px solid #d1d5db" : "1px solid #fecaca",
+                      color: user.isadmin ? "#9ca3af" : "#991b1b",
+                      borderRadius: "4px",
+                      fontSize: "12px",
+                      fontWeight: "500",
+                      cursor: user.isadmin ? "not-allowed" : "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "4px",
+                    }}
+                  >
+                    <Trash2 size={14} />
+                    {user.isadmin ? "Admin (Protected)" : t.delete}
+                  </button>
                 </div>
               ))}
             </div>
