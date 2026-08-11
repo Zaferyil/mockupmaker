@@ -4,7 +4,7 @@ import { getFirestore } from "firebase/firestore";
 
 // Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyBDV3CycXvto40GU74jJKUcck7yI4wsnLY",
+  apiKey: "AIzaSyDNatupiW9qAvCKRbzSswgews_S7Y2s6J0",
   authDomain: "mockupmaker-77cf4.firebaseapp.com",
   projectId: "mockupmaker-77cf4",
   storageBucket: "mockupmaker-77cf4.firebasestorage.app",
