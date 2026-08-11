@@ -19,7 +19,7 @@ import {
 import { LoginPage } from "./LoginPage";
 import { AdminPanel } from "./AdminPanel";
 import { InstallPrompt } from "./InstallPrompt";
-import { getCurrentUser, logout, getUserR2Path } from "./auth";
+import { getCurrentUser, logout, getUserR2Path, isAdminUser } from "./auth";
 import {
   createLockStore,
   importPlacements,
@@ -126,9 +126,9 @@ const LANGS = [
 // Labels for the authenticated shell around the studio (header + admin
 // entry point). Separate from the studio dictionary because App renders them.
 const SHELL_T = {
-  en: { adminPanel: "Admin Panel", logout: "Logout" },
-  tr: { adminPanel: "Admin Paneli", logout: "Çıkış" },
-  de: { adminPanel: "Admin-Panel", logout: "Abmelden" },
+  en: { adminPanel: "Admin Panel", logout: "Logout", manageUsers: "Add New User" },
+  tr: { adminPanel: "Admin Paneli", logout: "Çıkış", manageUsers: "Yeni Kullanıcı Ekle" },
+  de: { adminPanel: "Admin-Panel", logout: "Abmelden", manageUsers: "Neuen Benutzer anlegen" },
 };
 
 const T = {
@@ -292,7 +292,7 @@ function readFileAsDataURL(file) {
 
 // The language is owned by App rather than by the studio, because the admin
 // panel lives outside the studio and has to follow the same switch.
-function MockupStudio({ lang, setLang }) {
+function MockupStudio({ lang, setLang, currentUser, onOpenAdminPanel }) {
   const [langOpen, setLangOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -849,17 +849,22 @@ function MockupStudio({ lang, setLang }) {
             <button onClick={() => setMenuOpen(!menuOpen)} className="p-2 hover:bg-gray-100 rounded-lg">
               <span className="text-xl">☰</span>
             </button>
-            {menuOpen && currentUser?.isadmin && (
+            {menuOpen && (
               <div className="absolute left-0 top-12 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-48">
-                <button
-                  onClick={() => {
-                    setAdminPanelOpen(true);
-                    setMenuOpen(false);
-                  }}
-                  className="block w-full text-left px-4 py-3 text-sm font-body hover:bg-gray-50 text-gray-700 border-b border-gray-100"
-                >
-                  ⚙️ Yeni Kullanıcı Ekle
-                </button>
+                {isAdminUser(currentUser) && (
+                  <button
+                    onClick={() => {
+                      onOpenAdminPanel?.();
+                      setMenuOpen(false);
+                    }}
+                    className="block w-full text-left px-4 py-3 text-sm font-body hover:bg-gray-50 text-gray-700 border-b border-gray-100"
+                  >
+                    {`⚙️ ${SHELL_T[lang]?.manageUsers ?? SHELL_T.en.manageUsers}`}
+                  </button>
+                )}
+                <div className="px-4 py-2 text-xs font-body text-gray-400 truncate">
+                  {currentUser?.email ?? ""}
+                </div>
               </div>
             )}
             <div className="flex items-center gap-2">
@@ -2350,7 +2355,7 @@ export default function App() {
       >
         <div>
           <span style={{ fontWeight: "600" }}>👤 {currentUser.name}</span>
-          {currentUser.isadmin && (
+          {isAdminUser(currentUser) && (
             <span
               style={{
                 marginLeft: "8px",
@@ -2366,7 +2371,7 @@ export default function App() {
         </div>
 
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          {currentUser.isadmin && (
+          {isAdminUser(currentUser) && (
             <button
               onClick={() => setAdminPanelOpen(true)}
               style={{
@@ -2428,7 +2433,12 @@ export default function App() {
       )}
 
       {/* Main App */}
-      <MockupStudio lang={lang} setLang={setLang} />
+      <MockupStudio
+        lang={lang}
+        setLang={setLang}
+        currentUser={currentUser}
+        onOpenAdminPanel={() => setAdminPanelOpen(true)}
+      />
 
       <InstallPrompt lang={lang} />
     </div>

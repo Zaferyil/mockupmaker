@@ -1,108 +1,47 @@
-import { auth, db } from "./firebase";
-import {
-  signInWithEmailAndPassword,
-  signOut,
-  onAuthStateChanged,
-} from "firebase/auth";
-import { getDoc, doc } from "firebase/firestore";
+/**
+ * Oturum yönetimi — localStorage üzerinde çalışır, harici bir servise
+ * bağlı değildir.
+ *
+ * Daha önce Firebase Authentication kullanılıyordu; API anahtarı doğrulaması
+ * sürekli "auth/api-key-not-valid" veriyordu ve `firebase` paketi lockfile'da
+ * olmadığı için Netlify build'i de kırılıyordu. Uygulamanın kullanıcı sayısı
+ * elle yönetilecek kadar az olduğundan giriş tekrar yerel depoya alındı.
+ */
+import { findUserByEmail, isAdminUser } from "./userStore";
 
 const CURRENT_USER_KEY = "mockupmaker_currentUser";
+const TOKEN_KEY = "mockupmaker_token";
 
-let currentUser = null;
-let authInitialized = false;
-
-// Subscribe to auth state changes
-onAuthStateChanged(auth, async (firebaseUser) => {
-  authInitialized = true;
-
-  if (firebaseUser) {
-    // User is logged in - fetch their data from Firestore
-    try {
-      const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
-      if (userDoc.exists()) {
-        currentUser = {
-          id: firebaseUser.uid,
-          email: firebaseUser.email,
-          ...userDoc.data(),
-        };
-      } else {
-        // User exists in Auth but not in Firestore, create basic user object
-        currentUser = {
-          id: firebaseUser.uid,
-          email: firebaseUser.email,
-        };
-      }
-      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
-    } catch (error) {
-      console.error("Error fetching user data:", error);
-      currentUser = {
-        id: firebaseUser.uid,
-        email: firebaseUser.email,
-      };
-    }
-  } else {
-    // User is logged out
-    currentUser = null;
-    localStorage.removeItem(CURRENT_USER_KEY);
-  }
-});
+export { isAdminUser };
 
 export async function login(email, password) {
-  try {
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    const firebaseUser = userCredential.user;
+  const user = findUserByEmail(email);
 
-    // Fetch user data from Firestore
-    const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
-    if (userDoc.exists()) {
-      currentUser = {
-        id: firebaseUser.uid,
-        email: firebaseUser.email,
-        ...userDoc.data(),
-      };
-    } else {
-      currentUser = {
-        id: firebaseUser.uid,
-        email: firebaseUser.email,
-      };
-    }
-
-    localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
-    return currentUser;
-  } catch (error) {
-    throw new Error(error.message || "Invalid email or password");
+  if (!user || user.password !== password) {
+    throw new Error("Invalid email or password");
   }
+
+  // Şifre oturum nesnesine sızmasın: localStorage'ı herkes okuyabilir.
+  const { password: _password, ...session } = user;
+
+  localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(session));
+  localStorage.setItem(TOKEN_KEY, btoa(`${session.email}:${Date.now()}`));
+
+  return session;
 }
 
 export async function logout() {
-  try {
-    await signOut(auth);
-    currentUser = null;
-    localStorage.removeItem(CURRENT_USER_KEY);
-  } catch (error) {
-    console.error("Logout error:", error);
-    throw new Error(error.message || "Logout failed");
-  }
+  localStorage.removeItem(CURRENT_USER_KEY);
+  localStorage.removeItem(TOKEN_KEY);
 }
 
 export function getCurrentUser() {
-  // Return in-memory cache if available
-  if (currentUser) {
-    return currentUser;
+  try {
+    const stored = localStorage.getItem(CURRENT_USER_KEY);
+    return stored ? JSON.parse(stored) : null;
+  } catch {
+    return null;
   }
-
-  // Fallback to localStorage if in-memory cache is empty
-  const stored = localStorage.getItem(CURRENT_USER_KEY);
-  if (stored) {
-    try {
-      currentUser = JSON.parse(stored);
-      return currentUser;
-    } catch {
-      return null;
-    }
-  }
-
-  return null;
 }
 
 export function isLoggedIn() {
@@ -110,15 +49,11 @@ export function isLoggedIn() {
 }
 
 export function isAdmin() {
-  const user = getCurrentUser();
-  return user?.isadmin === true;
+  return isAdminUser(getCurrentUser());
 }
 
 export async function getToken() {
-  if (auth.currentUser) {
-    return await auth.currentUser.getIdToken();
-  }
-  return null;
+  return localStorage.getItem(TOKEN_KEY);
 }
 
 // Generate user-specific R2 path

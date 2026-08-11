@@ -1,79 +1,54 @@
 /**
- * Simple localStorage-based user management
+ * Admin panelinin kullandığı kullanıcı CRUD'u.
+ *
+ * Depolama katmanı userStore.js'te; burada sadece panelin beklediği asenkron
+ * arayüz var (panel Firestore döneminde `await` ile yazılmıştı, imzayı
+ * koruyoruz).
  */
-const USERS_KEY = "mockupmaker_users";
-
-function getStoredUsers() {
-  try {
-    const stored = localStorage.getItem(USERS_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveUsers(users) {
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
-}
+import { readUsers, writeUsers, findUserByEmail } from "./userStore";
 
 /**
- * Get all users
+ * Kayıtlı tüm kullanıcılar.
  */
 export async function getAllUsers() {
-  return getStoredUsers();
+  return readUsers();
 }
 
 /**
- * Get user by email
+ * E-postaya göre kullanıcı bul.
  */
 export async function getUserByEmail(email) {
-  const users = getStoredUsers();
-  return users.find(u => u.email === email) || null;
+  return findUserByEmail(email);
 }
 
 /**
- * Add new user
+ * Yeni kullanıcı ekle. Aynı e-posta ikinci kez eklenemez.
  */
 export async function addUser(email, name, metadata = {}) {
-  try {
-    const users = getStoredUsers();
+  const users = readUsers();
+  const needle = String(email).trim().toLowerCase();
 
-    // Check if user already exists
-    if (users.find(u => u.email === email)) {
-      throw new Error("User already exists");
-    }
-
-    const newUser = {
-      id: `user_${Date.now()}`,
-      email,
-      name,
-      isadmin: metadata.isadmin || false,
-      password: metadata.password || "password123",
-      createdAt: new Date().toISOString(),
-      ...metadata
-    };
-
-    users.push(newUser);
-    saveUsers(users);
-
-    return newUser;
-  } catch (error) {
-    console.error("Error adding user:", error);
-    throw error;
+  if (users.some((u) => String(u.email).toLowerCase() === needle)) {
+    throw new Error("Bu email zaten kayıtlı");
   }
+
+  const newUser = {
+    id: `user_${Date.now()}`,
+    email: String(email).trim(),
+    name,
+    password: metadata.password || "password123",
+    isadmin: metadata.isadmin === true,
+    createdAt: new Date().toISOString(),
+  };
+
+  writeUsers([...users, newUser]);
+  return newUser;
 }
 
 /**
- * Remove user
+ * Kullanıcı sil. Panel admin kayıtlarını zaten engelliyor.
  */
 export async function removeUser(userId) {
-  try {
-    const users = getStoredUsers();
-    const filtered = users.filter(u => u.id !== userId);
-    saveUsers(filtered);
-    console.log(`User ${userId} removed`);
-  } catch (error) {
-    console.error("Error removing user:", error);
-    throw error;
-  }
+  const users = readUsers();
+  writeUsers(users.filter((u) => u.id !== userId));
 }
