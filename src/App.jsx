@@ -2336,7 +2336,7 @@ export default function App() {
       >
         <div>
           <span style={{ fontWeight: "600" }}>👤 {currentUser.name}</span>
-          {currentUser.role === "admin" && (
+          {currentUser.isadmin && (
             <span
               style={{
                 marginLeft: "8px",
@@ -2352,7 +2352,7 @@ export default function App() {
         </div>
 
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          {currentUser.role === "admin" && (
+          {currentUser.isadmin && (
             <button
               onClick={() => setAdminPanelOpen(true)}
               style={{
