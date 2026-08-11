@@ -312,53 +312,6 @@ export function LoginPage({ onLoginSuccess }) {
             </button>
           </form>
 
-          {/* Divider */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "12px",
-              margin: "24px 0",
-              color: "#d1d5db",
-              fontSize: "14px",
-            }}
-          >
-            <div style={{ flex: 1, height: "1px", background: "#e5e7eb" }} />
-            <span>or</span>
-            <div style={{ flex: 1, height: "1px", background: "#e5e7eb" }} />
-          </div>
-
-          {/* Google Button */}
-          <button
-            type="button"
-            style={{
-              width: "100%",
-              padding: "14px",
-              background: "white",
-              border: "1.5px solid #e5e7eb",
-              borderRadius: "12px",
-              fontSize: "15px",
-              fontWeight: "600",
-              cursor: "pointer",
-              color: "#1f2937",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "10px",
-              transition: "all 200ms",
-            }}
-            onMouseEnter={(e) => {
-              e.target.style.borderColor = ACCENT.violet;
-              e.target.style.background = "rgba(123, 97, 255, 0.05)";
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.borderColor = "#e5e7eb";
-              e.target.style.background = "white";
-            }}
-          >
-            <span style={{ fontSize: "18px" }}>🔵</span>
-            Continue with Google
-          </button>
         </div>
 
         {/* Sign Up Link */}
