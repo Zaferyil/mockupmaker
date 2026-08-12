@@ -19,12 +19,12 @@
 // with a SecurityError. The model weights fetched from the CDN are in the same
 // position. So the worker stays entirely out of their way.
 
-const VERSION = "v1";
+const VERSION = "v2";
 const CACHE = `mockupmaker-${VERSION}`;
 
 // The shell needed to start offline. Hashed assets are added as they are used
 // rather than listed here, because their names change on every build.
-const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/favicon.svg", "/icon-192.png"];
+const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/favicon.png", "/icon-192.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
