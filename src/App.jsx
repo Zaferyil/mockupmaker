@@ -303,6 +303,10 @@ function MockupStudio({ lang, setLang, currentUser, onOpenAdminPanel }) {
   const [selectedKeys, setSelectedKeys] = useState([]);
 
   const [designImg, setDesignImg] = useState(null);
+  // TrendMint'ten gelen tasarımın bilgileri. Sadece transfer ile gelen tasarımda
+  // dolar — kullanıcı kendi dosyasını yüklediğinde temizlenir, böylece banner
+  // yanlış tasarımı gösteremez.
+  const [trendMintDesign, setTrendMintDesign] = useState(null);
   // Placement geometry lives in a Template Lock store, not in component state.
   // A lock is per-mockup and artwork-independent, so it is measured once and
   // then reused for every design that is ever uploaded onto that template.
@@ -358,6 +362,7 @@ function MockupStudio({ lang, setLang, currentUser, onOpenAdminPanel }) {
         const { design } = JSON.parse(transfer);
         if (design?.imageUrl) {
           setDesignImg(design.imageUrl);
+          setTrendMintDesign(design);
           localStorage.removeItem('trendmint_pending_transfer');
           console.log('✨ TrendMint tasarım yüklendi:', design.name);
         }
@@ -833,6 +838,8 @@ function MockupStudio({ lang, setLang, currentUser, onOpenAdminPanel }) {
     if (!file) return;
     const dataUrl = await readFileAsDataURL(file);
     setDesignImg(dataUrl);
+    // Kendi dosyasını yükledi — artık ekranda TrendMint tasarımı yok.
+    setTrendMintDesign(null);
     // A different design invalidates every rendered tile.
     setStamps({});
   }
@@ -844,6 +851,8 @@ function MockupStudio({ lang, setLang, currentUser, onOpenAdminPanel }) {
     if (!file) return;
     const dataUrl = await readFileAsDataURL(file);
     setDesignImg(dataUrl);
+    // Kendi dosyasını sürükledi — artık ekranda TrendMint tasarımı yok.
+    setTrendMintDesign(null);
     // A different design invalidates every rendered tile.
     setStamps({});
   }
@@ -982,6 +991,43 @@ function MockupStudio({ lang, setLang, currentUser, onOpenAdminPanel }) {
 
       {/* Main Content */}
       <div className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
+        {/* TrendMint'ten gelen tasarım. Tasarım zaten 3. adıma yüklendi, ama
+            sayfanın en altında görünmeyen bir yere düşüyor — banner olmadan
+            transferin işe yaradığı anlaşılmıyor. */}
+        {trendMintDesign && (
+          <div
+            className="mb-6 rounded-2xl border p-4 sm:p-5 flex items-center gap-4"
+            style={{ borderColor: ACCENT.teal, backgroundColor: "rgba(0, 194, 168, 0.06)" }}
+          >
+            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-white border border-gray-200 overflow-hidden shrink-0 flex items-center justify-center">
+              <img src={trendMintDesign.imageUrl} alt={trendMintDesign.name} className="w-full h-full object-contain" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <span
+                  className="font-mono2 text-[10px] uppercase tracking-wider rounded-full px-2 py-0.5 text-white"
+                  style={{ backgroundColor: ACCENT.teal }}
+                >
+                  TrendMint
+                </span>
+                <span className="font-display font-semibold text-sm text-gray-900 truncate">
+                  {trendMintDesign.name || "Design"}
+                </span>
+              </div>
+              <p className="font-body text-xs text-gray-600">
+                Design loaded — pick a folder and mockups below, then place it in step 3.
+              </p>
+            </div>
+            <button
+              onClick={() => setTrendMintDesign(null)}
+              className="p-2 rounded-lg hover:bg-white/60 transition shrink-0"
+              aria-label="Dismiss"
+            >
+              <X className="w-4 h-4 text-gray-500" />
+            </button>
+          </div>
+        )}
+
         {/* Step 1: Choose Folder */}
         <div className="mb-8 sm:mb-12">
           <div className="flex items-start gap-4 mb-4">
