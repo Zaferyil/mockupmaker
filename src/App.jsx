@@ -350,6 +350,23 @@ function MockupStudio({ lang, setLang, currentUser, onOpenAdminPanel }) {
 
   const t = T[lang];
 
+  // TrendMint'ten gelen tasarımı kontrol et ve yükle
+  useEffect(() => {
+    const transfer = localStorage.getItem('trendmint_pending_transfer');
+    if (transfer) {
+      try {
+        const { design } = JSON.parse(transfer);
+        if (design?.imageUrl) {
+          setDesignImg(design.imageUrl);
+          localStorage.removeItem('trendmint_pending_transfer');
+          console.log('✨ TrendMint tasarım yüklendi:', design.name);
+        }
+      } catch (e) {
+        console.error('TrendMint tasarım yüklenemedi:', e);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     if (!R2_LIST_URL) return;
     let cancelled = false;
