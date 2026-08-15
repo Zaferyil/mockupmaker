@@ -53,6 +53,11 @@ const R2_LIST_URL = R2_ORIGIN ? `${R2_ORIGIN}/list` : null;
 // Her mockup dosyası için kalibre edilmiş baskı alanı koordinatlarını okuyup yazan endpoint.
 const R2_PLACEMENTS_URL = R2_ORIGIN ? `${R2_ORIGIN}/placements` : null;
 
+// TrendMint'ten gelen tasarım devrini hangi adreslerden kabul ettiğimiz.
+// Sadece bu origin'lerden gelen mesajlar okunur; başka bir sayfa uygulamaya
+// tasarım enjekte edemesin diye liste dar tutuluyor.
+const TRENDMINT_ORIGINS = ["https://trendmint.netlify.app", "http://localhost:5173"];
+
 function mockupSrcFor(key) {
   if (!R2_BASE_URL) return null;
   // Klasörlü anahtarlarda "/" korunmalı, sadece segmentler encode edilmeli
@@ -354,22 +359,43 @@ function MockupStudio({ lang, setLang, currentUser, onOpenAdminPanel }) {
 
   const t = T[lang];
 
-  // TrendMint'ten gelen tasarımı kontrol et ve yükle
+  // TrendMint tasarımı postMessage ile devreder.
+  //
+  // İki uygulama ayrı alan adlarında yaşıyor, dolayısıyla localStorage'ı
+  // paylaşamazlar — tarayıcı her origin'e kendi deposunu verir. postMessage
+  // origin'ler arası veri geçirmenin tek doğrudan yolu ve data URL boyutunda
+  // bir görseli taşıyabiliyor.
+  //
+  // El sıkışma bu tarafta başlıyor: TrendMint bu sekmenin ne zaman
+  // yüklendiğini bilemez, o yüzden hazır olduğumuzu biz haber veriyoruz.
   useEffect(() => {
-    const transfer = localStorage.getItem('trendmint_pending_transfer');
-    if (transfer) {
-      try {
-        const { design } = JSON.parse(transfer);
-        if (design?.imageUrl) {
-          setDesignImg(design.imageUrl);
-          setTrendMintDesign(design);
-          localStorage.removeItem('trendmint_pending_transfer');
-          console.log('✨ TrendMint tasarım yüklendi:', design.name);
+    function onMessage(event) {
+      if (!TRENDMINT_ORIGINS.includes(event.origin)) return;
+      if (event.data?.type !== "trendmint:design") return;
+      const design = event.data.design;
+      if (!design?.imageUrl) return;
+
+      setDesignImg(design.imageUrl);
+      setTrendMintDesign(design);
+      // Yeni tasarım, üretilmiş her kareyi geçersiz kılar.
+      setStamps({});
+      // Alındı bilgisi — yoksa TrendMint göndermeyi tekrarlayıp durur.
+      event.source?.postMessage({ type: "mockupmaker:received" }, event.origin);
+    }
+
+    window.addEventListener("message", onMessage);
+    if (window.opener) {
+      // Hedef origin eşleşmezse tarayıcı mesajı düşürür, o yüzden aday
+      // adreslerin hepsine göndermek güvenli — yanlış olana ulaşmaz.
+      for (const origin of TRENDMINT_ORIGINS) {
+        try {
+          window.opener.postMessage({ type: "mockupmaker:ready" }, origin);
+        } catch {
+          // Pencere kapanmış olabilir; diğer adreslerle devam.
         }
-      } catch (e) {
-        console.error('TrendMint tasarım yüklenemedi:', e);
       }
     }
+    return () => window.removeEventListener("message", onMessage);
   }, []);
 
   useEffect(() => {
